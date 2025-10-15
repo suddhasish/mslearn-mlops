@@ -1,19 +1,76 @@
-name: Manually trigger an Azure Machine Learning job
+name: Trigger Azure ML job (manual)
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
-  train:
+  submit-aml-job:
     runs-on: ubuntu-latest
+    env:
+      JOB_YML: src/job.yml                       # <-- change: path under src
+      AZURE_ML_RESOURCE_GROUP: ${{ secrets.AZURE_ML_RESOURCE_GROUP }}
+      AZURE_ML_WORKSPACE_NAME: ${{ secrets.AZURE_ML_WORKSPACE_NAME }}
+      # Optional override (set as repo secret or leave empty)
+      TRAINING_DATA: ${{ secrets.AZURE_ML_TRAINING_DATA_PATH || '' }}
     steps:
-    - name: Check out repo
-      uses: actions/checkout@main
-    - name: Install az ml extension
-      run: az extension add -n ml -y
-    - name: Azure login
-      uses: azure/login@v1
-      with:
-        creds: ${{secrets.AZURE_CREDENTIALS}}
+      - name: Check out repo
+        uses: actions/checkout@v4
 
+      - name: Install prerequisites (Azure CLI + jq)
+        run: |
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Azure login (Service Principal)
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install Azure ML extension
+        run: |
+          az extension remove -n ml || true
+          az extension add -n ml --upgrade
+
+      - name: Show Azure & ML versions
+        run: |
+          az --version
+          az ml -h
+
+      - name: (Optional) Validate job YAML
+        run: |
+          echo "Validating job YAML: $JOB_YML"
+          az ml job create --file "$JOB_YML" --resource-group "$AZURE_ML_RESOURCE_GROUP" --workspace-name "$AZURE_ML_WORKSPACE_NAME" --no-wait --validate-only
+
+      - name: Submit Azure ML job
+        id: submit_job
+        run: |
+          echo "Submitting job from $JOB_YML"
+          CMD="az ml job create --file \"$JOB_YML\" --resource-group \"$AZURE_ML_RESOURCE_GROUP\" --workspace-name \"$AZURE_ML_WORKSPACE_NAME\" -o json"
+          if [ -n "${TRAINING_DATA}" ]; then
+            echo "Overriding inputs.training_data.path with: ${TRAINING_DATA}"
+            CMD="$CMD --set inputs.training_data.path='${TRAINING_DATA}'"
+          fi
+          echo "Running: $CMD"
+          JOB_JSON=$(eval $CMD)
+          echo "$JOB_JSON" > job_submit_output.json
+          JOB_ID=$(echo "$JOB_JSON" | jq -r '.name')
+          echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+          echo "::group::Job JSON"
+          echo "$JOB_JSON"
+          echo "::endgroup::"
+          echo "Submitted job id: $JOB_ID"
+          echo "Azure ML Studio URL (open in browser): https://ml.azure.com/jobs/$JOB_ID?workspaceName=$AZURE_ML_WORKSPACE_NAME"
+
+      - name: Print job link
+        run: |
+          echo "Job ID: ${{ steps.submit_job.outputs.job_id }}"
+          echo "Open in Azure ML Studio: https://ml.azure.com/jobs/${{ steps.submit_job.outputs.job_id }}?workspaceName=${{ env.AZURE_ML_WORKSPACE_NAME }}"
+
+      - name: Success message
+        if: always()
+        run: |
+          echo "Workflow finished. Submitted job id: ${{ steps.submit_job.outputs.job_id }}"
