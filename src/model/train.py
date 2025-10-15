@@ -29,17 +29,17 @@ logger = logging.getLogger(__name__)
 
 def main(args):
     # TO DO: enable autologging
-      # 🟥 >>> ADDED CODE START
+# 🟥 >>> ADDED CODE START
     mlflow.autolog()
     logger.info("Starting training run")
     logger.info("Arguments: %s", args)
-       # 🟥 >>> ADDED CODE END
+# 🟥 >>> ADDED CODE END
 
     # read data
     df = get_csvs_df(args.training_data)
 
     # split data
-      # 🟥 >>> ADDED CODE START
+# 🟥 >>> ADDED CODE START
     X_train, X_test, y_train, y_test = split_data(
         df,
         target_col=args.target_col,
@@ -102,10 +102,9 @@ def split_data(
     )
 
     return X_train, X_test, y_train, y_test
-# 🟥 >>> ADDED CODE END
 
 def train_model(reg_rate, X_train, X_test, y_train, y_test):
-       # 🟥 >>> ADDED CODE START
+# 🟥 >>> ADDED CODE START
     logger.info("Training model with reg_rate=%s", reg_rate)
     clf = LogisticRegression(C=1 / reg_rate, solver="liblinear").fit(
         X_train, y_train
@@ -147,20 +146,20 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test):
         mlflow.log_metric("f1", f1)
     except Exception as e:
         logger.warning("MLflow logging failed: %s", e)
-         # 🟥 >>> ADDED CODE END
+# 🟥 >>> ADDED CODE END
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--training_data", dest="training_data", type=str)
     parser.add_argument("--reg_rate", dest="reg_rate", type=float, default=0.01)
-    # 🟥 >>> ADDED CODE START
+# 🟥 >>> ADDED CODE START
     parser.add_argument("--target_col", dest="target_col", type=str, default=None)
     parser.add_argument("--test_size", dest="test_size", type=float, default=0.2)
     parser.add_argument(
         "--random_state", dest="random_state", type=int, default=42
     )
-     # 🟥 >>> ADDED CODE END
+# 🟥 >>> ADDED CODE END
     args = parser.parse_args()
     return args
 
