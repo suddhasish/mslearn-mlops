@@ -29,24 +29,24 @@ logger = logging.getLogger(__name__)
 
 def main(args):
     # TO DO: enable autologging
-# 🟥 >>> ADDED CODE START
+    # 🟥 >>> ADDED CODE START
     mlflow.autolog()
     logger.info("Starting training run")
     logger.info("Arguments: %s", args)
-# 🟥 >>> ADDED CODE END
+    # 🟥 >>> ADDED CODE END
 
     # read data
     df = get_csvs_df(args.training_data)
 
     # split data
-# 🟥 >>> ADDED CODE START
+    # 🟥 >>> ADDED CODE START
     X_train, X_test, y_train, y_test = split_data(
         df,
         target_col=args.target_col,
         test_size=args.test_size,
         random_state=args.random_state,
     )
- # 🟥 >>> ADDED CODE END
+    # 🟥 >>> ADDED CODE END
     # train model
     train_model(args.reg_rate, X_train, X_test, y_train, y_test)
 
@@ -65,6 +65,7 @@ def get_csvs_df(path):
 
 # 🟥 >>> ADDED CODE START
 # TO DO: add function to split data
+
 def split_data(
     df, target_col: str = None, test_size: float = 0.2, random_state: int = 42
 ):
@@ -102,6 +103,7 @@ def split_data(
     )
 
     return X_train, X_test, y_train, y_test
+
 
 def train_model(reg_rate, X_train, X_test, y_train, y_test):
 # 🟥 >>> ADDED CODE START
@@ -151,11 +153,19 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--training_data", dest="training_data", type=str)
-    parser.add_argument("--reg_rate", dest="reg_rate", type=float, default=0.01)
+    parser.add_argument(
+        "--training_data", dest="training_data", type=str
+    )
+    parser.add_argument(
+        "--reg_rate", dest="reg_rate", type=float, default=0.01
+    )
 # 🟥 >>> ADDED CODE START
-    parser.add_argument("--target_col", dest="target_col", type=str, default=None)
-    parser.add_argument("--test_size", dest="test_size", type=float, default=0.2)
+    parser.add_argument(
+        "--target_col", dest="target_col", type=str, default=None
+    )
+    parser.add_argument(
+        "--test_size", dest="test_size", type=float, default=0.2
+    )
     parser.add_argument(
         "--random_state", dest="random_state", type=int, default=42
     )
