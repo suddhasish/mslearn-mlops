@@ -66,6 +66,7 @@ def get_csvs_df(path):
 # 🟥 >>> ADDED CODE START
 # TO DO: add function to split data
 
+
 def split_data(
     df, target_col: str = None, test_size: float = 0.2, random_state: int = 42
 ):
@@ -106,7 +107,7 @@ def split_data(
 
 
 def train_model(reg_rate, X_train, X_test, y_train, y_test):
-# 🟥 >>> ADDED CODE START
+    # 🟥 >>> ADDED CODE START
     logger.info("Training model with reg_rate=%s", reg_rate)
     clf = LogisticRegression(C=1 / reg_rate, solver="liblinear").fit(
         X_train, y_train
