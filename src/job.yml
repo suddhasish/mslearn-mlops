@@ -1,15 +1,28 @@
 $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 code: model
 command: >-
-  python 
-  --
-  --
+  python train.py
+  --training_data ${{inputs.training_data}}
+  --reg_rate 0.01
+  --target_col None
+  --test_size 0.2
+  --random_state 42
 inputs:
-  training_data: 
-    type: uri_folder 
-    path: 
-  reg_rate: 0.01
+  training_data:
+    type: uri_folder
+    # replace this with your datastore path or local folder containing CSVs
+    path: azureml:diabetes-dev-folder@latest
+outputs:
+  model:
+    #type: uri_folder
+    # job will write trained artifacts here (train.py currently logs metrics; add model saving to put files here)
+    #path: ./outputs/model
+  model:
+    type: uri_folder
+    mode: rw_mount
 environment: azureml:AzureML-sklearn-0.24-ubuntu18.04-py37-cpu@latest
-compute: 
-experiment_name: 
-description: 
+compute: amlcluster
+experiment_name: diabetic_ogistic_regression_training
+description: >-
+  Train a LogisticRegression model on CSV files in `training_data`. 
+  Uses basic preprocessing, MLflow autologging and logs accuracy/precision/recall/f1.
