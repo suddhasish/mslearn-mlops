@@ -1,21 +1,98 @@
-name: Trigger Azure ML job (manual)
-
+name: CI & Trigger Azure ML job
 on:
   workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
   id-token: write
 
+env:
+  AZURE_ML_RESOURCE_GROUP: ${{ secrets.AZURE_ML_RESOURCE_GROUP }}
+  AZURE_ML_WORKSPACE_NAME: ${{ secrets.AZURE_ML_WORKSPACE_NAME }}
+  JOB_YML: src/job.yml
+  # Optional override for training data path
+  TRAINING_DATA: ${{ secrets.AZURE_ML_TRAINING_DATA_PATH || '' }}
+
 jobs:
-  submit-aml-job:
+  # --------------------
+  # Lint job (runs on PRs)
+  # --------------------
+  lint:
+    name: Flake8 lint
     runs-on: ubuntu-latest
-    env:
-      JOB_YML: src/job.yml                       # <-- change: path under src
-      AZURE_ML_RESOURCE_GROUP: ${{ secrets.AZURE_ML_RESOURCE_GROUP }}
-      AZURE_ML_WORKSPACE_NAME: ${{ secrets.AZURE_ML_WORKSPACE_NAME }}
-      # Optional override (set as repo secret or leave empty)
-      TRAINING_DATA: ${{ secrets.AZURE_ML_TRAINING_DATA_PATH || '' }}
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies (for lint)
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            python -m pip install -r requirements.txt
+          fi
+          # ensure flake8 is available
+          python -m pip install flake8
+
+      - name: Run flake8
+        run: |
+          # Lint source and tests folders; adjust paths if needed
+          echo "Running flake8 on src/ and tests/"
+          python -m flake8 src/ tests/ || (echo "Flake8 found issues" && exit 1)
+
+  # --------------------
+  # Tests job (runs on PRs)
+  # --------------------
+  test:
+    name: Pytest unit tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: lint   # optional: run tests after lint passes; remove if you want parallel
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies (for tests)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+          # ensure pytest is available
+          python -m pip install pytest pytest-cov
+
+      - name: Run pytest
+        run: |
+          # Run tests and produce junit xml for CI parsing if desired
+          pytest -q --junitxml=reports/junit.xml -o log_cli=true -o log_cli_level=INFO
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-reports
+          path: reports/
+
+  # --------------------
+  # Submit AML job (manual only)
+  # --------------------
+  submit-aml-job:
+    name: Submit Azure ML job
+    runs-on: ubuntu-latest
+    # Only run the submit job when the workflow is manually dispatched.
+    if: github.event_name == 'workflow_dispatch'
+    needs: [lint, test]   # optional: require lint & tests to pass before manual submission; remove if not desired
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
@@ -39,7 +116,7 @@ jobs:
         run: |
           az --version
           az ml -h
-          
+
       - name: Submit Azure ML job
         id: submit_job
         run: |
