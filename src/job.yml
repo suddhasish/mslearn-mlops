@@ -25,4 +25,4 @@ compute: amlcluster
 experiment_name: diabetic_ogistic_regression_training
 description: >-
   Train a LogisticRegression model on CSV files in `training_data`. 
-  Uses basic preprocessing, MLflow autologging and logs accuracy/precision/recall/f1.
+  Uses basic preprocessing, MLflow autologging and logs accuracy/precision/recall/f1
