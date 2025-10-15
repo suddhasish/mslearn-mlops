@@ -91,7 +91,7 @@ jobs:
     name: Submit Azure ML job
     runs-on: ubuntu-latest
     # Only run the submit job when the workflow is manually dispatched.
-    if: github.event_name == 'workflow_dispatch'
+    #if: github.event_name == 'workflow_dispatch'
     needs: [lint, test]   # optional: require lint & tests to pass before manual submission; remove if not desired
     steps:
       - name: Check out repo
