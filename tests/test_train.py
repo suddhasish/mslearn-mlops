@@ -37,14 +37,18 @@ def _build_sample_dataframe(n_rows=10, include_categorical=True,
 
 def test_get_csvs_df_errors_for_missing_path(tmp_path):
     bad_path = tmp_path / "does_not_exist"
-    with pytest.raises(RuntimeError, match="Cannot use non-existent path provided"):
+    with pytest.raises(
+        RuntimeError, match="Cannot use non-existent path provided"
+    ):
         get_csvs_df(str(bad_path))
 
 
 def test_get_csvs_df_errors_for_no_csv(tmp_path):
     empty = tmp_path / "empty_dir"
     empty.mkdir()
-    with pytest.raises(RuntimeError, match="No CSV files found in provided data"):
+    with pytest.raises(
+        RuntimeError, match="No CSV files found in provided data"
+    ):
         get_csvs_df(str(empty))
 
 
