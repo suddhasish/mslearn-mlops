@@ -16,9 +16,9 @@ env:
   TRAINING_DATA: ${{ secrets.AZURE_ML_TRAINING_DATA_PATH || '' }}
 
 jobs:
-  # --------------------
+  # ---------------------
   # Lint job (runs on PRs)
-  # --------------------
+  # ---------------------
   lint:
     name: Flake8 lint
     runs-on: ubuntu-latest
