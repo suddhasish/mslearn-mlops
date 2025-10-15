@@ -16,7 +16,7 @@ def _make_csv(path, filename, df):
 def _build_sample_dataframe(n_rows=10, include_categorical=True,
                             include_bool=True, include_nans=True):
     """Create a small sample DataFrame covering numeric, categorical,
-    bool, and NaNs."""
+    bool, and NaNs.."""
     rng = np.random.default_rng(42)
     df = pd.DataFrame({
         "num1": rng.integers(0, 100, size=n_rows).astype(float),
