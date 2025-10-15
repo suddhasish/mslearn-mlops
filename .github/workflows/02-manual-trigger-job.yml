@@ -43,7 +43,7 @@ jobs:
       - name: (Optional) Validate job YAML
         run: |
           echo "Validating job YAML: $JOB_YML"
-          az ml job create --file "$JOB_YML" --resource-group "$AZURE_ML_RESOURCE_GROUP" --workspace-name "$AZURE_ML_WORKSPACE_NAME" --no-wait --validate-only
+          az ml job create --file "$JOB_YML" --resource-group "$AZURE_ML_RESOURCE_GROUP" --workspace-name "$AZURE_ML_WORKSPACE_NAME"
 
       - name: Submit Azure ML job
         id: submit_job
