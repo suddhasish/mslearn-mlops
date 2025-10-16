@@ -1,3 +1,4 @@
+# File: src/compare_metrics.py
 #!/usr/bin/env python3
 """
 Compare new model metrics (metrics.json) with best registered model metric.
@@ -40,13 +41,17 @@ def get_best_existing_metric(
                 tags = getattr(m, "tags", {}) or {}
                 if metric_key in tags:
                     val = parse_float(tags.get(metric_key))
-                    if val is not None and (best is None or val > best):
+                    if val is not None and (
+                        best is None or val > best
+                    ):
                         best = val
                         continue
                 props = getattr(m, "properties", None) or {}
                 if metric_key in props:
                     val = parse_float(props.get(metric_key))
-                    if val is not None and (best is None or val > best):
+                    if val is not None and (
+                        best is None or val > best
+                    ):
                         best = val
                         continue
             except Exception:
@@ -61,10 +66,16 @@ def get_best_existing_metric(
 def main() -> int:
     """Command-line entrypoint."""
     parser = argparse.ArgumentParser(description="Compare model metrics.")
-    parser.add_argument("--model_dir", required=True, help="Downloaded model folder")
-    parser.add_argument("--model_name", required=True, help="Registered model name")
     parser.add_argument(
-        "--primary_metric", default="f1", help="Primary metric key to compare"
+        "--model_dir", required=True, help="Downloaded model folder"
+    )
+    parser.add_argument(
+        "--model_name", required=True, help="Registered model name"
+    )
+    parser.add_argument(
+        "--primary_metric",
+        default="f1",
+        help="Primary metric key to compare",
     )
     parser.add_argument(
         "--subscription_id",
@@ -100,9 +111,14 @@ def main() -> int:
     )
 
     print("New model metrics:", metrics)
-    print("Primary metric (%s) value: %s", args.primary_metric, str(new_val))
+    print(
+        "Primary metric (%s) value: %s"
+        % (args.primary_metric, str(new_val))
+    )
 
-    if not (args.subscription_id and args.resource_group and args.workspace):
+    if not (
+        args.subscription_id and args.resource_group and args.workspace
+    ):
         print(
             "subscription/resource_group/workspace must be provided",
             file=sys.stderr,
@@ -112,14 +128,16 @@ def main() -> int:
         return 3
 
     cred = AzureCliCredential()
-    ml_client = MLClient(cred, args.subscription_id, args.resource_group, args.workspace)
+    ml_client = MLClient(
+        cred, args.subscription_id, args.resource_group, args.workspace
+    )
 
-    existing_best = get_best_existing_metric(ml_client, args.model_name, args.primary_metric)
+    existing_best = get_best_existing_metric(
+        ml_client, args.model_name, args.primary_metric
+    )
     print(
-        "Existing best %s for model '%s': %s",
-        args.primary_metric,
-        args.model_name,
-        str(existing_best),
+        "Existing best %s for model '%s': %s"
+        % (args.primary_metric, args.model_name, str(existing_best))
     )
 
     improved = False
