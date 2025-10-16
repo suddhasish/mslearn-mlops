@@ -36,7 +36,18 @@ def main(args):
     logger.info("Starting training run")
     logger.info("Arguments: %s", args)
     # 🟥 >>> ADDED CODE END
+    # print and log the injected output path so it's visible in job logs
+    logger.info("Output path passed to script: %s", args.output)
+    print("OUTPUT_PATH_IN_CONTAINER=", args.output, flush=True)
 
+    # create marker (so you can see it in uploads)
+    try:
+        os.makedirs(args.output, exist_ok=True)
+        with open(os.path.join(args.output, "RUN_MARKER.txt"), "w") as fh:
+            fh.write("written_by_train.py\n")
+        logger.info("Wrote RUN_MARKER.txt to output folder")
+    except Exception as e:
+        logger.warning("Failed to create marker file in output folder: %s", e)
     # read data
     df = get_csvs_df(args.training_data)
 
