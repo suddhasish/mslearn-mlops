@@ -1,5 +1,4 @@
 # File: src/register_local.py
-#!/usr/bin/env python3
 # Register a local model directory with Azure ML Model Registry.
 # Auth: uses AzureCliCredential (after `az login`).
 from __future__ import annotations
