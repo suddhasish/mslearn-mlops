@@ -21,6 +21,7 @@ outputs:
     type: uri_folder
     #mode: rw_mount
     mode: upload
+    path: ./outputs/model
 environment: azureml:AzureML-sklearn-0.24-ubuntu18.04-py37-cpu@latest
 compute: amlcluster
 experiment_name: diabetic_ogistic_regression_training
