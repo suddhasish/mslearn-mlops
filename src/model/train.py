@@ -46,7 +46,7 @@ def main(args):
 
     # log & print resolved path so you can find it in container logs
     logger.info("Resolved output path: %s (args.output=%s env_output=%s)", 
-        out_path, args.output, env_output)
+    out_path, args.output, env_output)
     print("OUTPUT_PATH_IN_CONTAINER=", out_path, flush=True)
 
     # create marker (so you can see it in uploads)
