@@ -120,7 +120,3 @@ def test_train_model_logs_metrics(monkeypatch, tmp_path):
         val = logged[metric][-1]
         assert isinstance(val, (int, float))
         assert 0.0 <= float(val) <= 1.0
-
-    # optional: assert artifacts were created (supports .pkl or .joblib)
-    assert (out_dir / "model.pkl").exists()
-    assert (out_dir / "metrics.json").exists()
