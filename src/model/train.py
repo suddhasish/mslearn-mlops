@@ -50,7 +50,7 @@ def main(args):
     )
     # 🟥 >>> ADDED CODE END
     # train model
-    train_model(args.reg_rate, X_train, X_test, y_train, y_test)
+    train_model(args.reg_rate, X_train, X_test, y_train, y_test, args.output)
 
 
 def get_csvs_df(path):
@@ -108,7 +108,7 @@ def split_data(
     return X_train, X_test, y_train, y_test
 
 
-def train_model(reg_rate, X_train, X_test, y_train, y_test):
+def train_model(reg_rate, X_train, X_test, y_train, y_test, output_dir: str):
     # 🟥 >>> ADDED CODE START
     logger.info("Training model with reg_rate=%s", reg_rate)
     clf = LogisticRegression(C=1 / reg_rate, solver="liblinear").fit(
@@ -197,6 +197,10 @@ def parse_args():
     )
     parser.add_argument(
         "--random_state", dest="random_state", type=int, default=42
+    )
+    parser.add_argument(
+        "--output", dest="output", type=str, default="outputs/model",
+        help="For Azure ML outputs use ${{outputs.model}}"
     )
 # 🟥 >>> ADDED CODE END
     args = parser.parse_args()
