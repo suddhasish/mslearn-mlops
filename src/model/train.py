@@ -9,6 +9,8 @@ from sklearn.linear_model import LogisticRegression
 
 # 🟥 >>> ADDED CODE START
 import logging
+import json
+import joblib
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
@@ -178,6 +180,7 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test):
         logger.info("Saved metrics to %s", metrics_path)
     except Exception as e:
         logger.warning("Failed to save metrics: %s", e)
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
