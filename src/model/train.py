@@ -158,7 +158,7 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test):
     out_dir = "outputs/model"
     os.makedirs(out_dir, exist_ok=True)
 
-    model_path = os.path.join(out_dir, "model.joblib")
+    model_path = os.path.join(out_dir, "model.pkl")
     try:
         joblib.dump(clf, model_path)
         logger.info("Saved model to %s", model_path)
