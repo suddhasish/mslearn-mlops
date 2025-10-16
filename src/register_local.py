@@ -67,7 +67,11 @@ def main() -> int:
         default=os.environ.get("AZURE_ML_WORKSPACE_NAME"),
         help="Azure ML workspace name",
     )
-    parser.add_argument("--force", action="store_true", help="Force registration")
+    parser.add_argument(
+        "--force", 
+        action="store_true", 
+        help="Force registration"
+    )
     args = parser.parse_args()
 
     if not os.path.isdir(args.model_dir):
