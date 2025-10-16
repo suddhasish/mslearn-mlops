@@ -1,5 +1,4 @@
 # File: src/compare_metrics.py
-#!/usr/bin/env python3
 # Compare new model metrics (metrics.json) with best registered model metric.
 # Writes 'improved.txt' containing "true" or "false".
 # Uses AzureCliCredential (works after `az login` in GitHub Actions).
