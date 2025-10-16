@@ -81,9 +81,9 @@ def main(args):
         files = os.listdir(out_path)
         logger.info(
             "Final contents of output folder (%s): %s",
-             out_path,
-             files,
-    )
+            out_path,
+            files,
+        )
         print("OUTPUT_DIR_LISTING=", files, flush=True)
     except Exception as e:
         logger.warning("Failed to list output dir contents: %s", e)
