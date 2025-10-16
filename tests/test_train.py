@@ -95,7 +95,7 @@ def test_split_data_with_explicit_target_column():
     assert y_train.name == "my_target"
 
 
-def test_train_model_logs_metrics(monkeypatch):
+def test_train_model_logs_metrics(monkeypatch, tmp_path):
     df = _build_sample_dataframe(n_rows=40)
     X_train, X_test, y_train, y_test = split_data(
         df, target_col="label", test_size=0.25, random_state=7
@@ -109,10 +109,18 @@ def test_train_model_logs_metrics(monkeypatch):
     import mlflow
     monkeypatch.setattr(mlflow, "log_metric", fake_log_metric)
 
-    train_model(0.05, X_train, X_test, y_train, y_test)
+    # create an isolated output directory for this test and pass its path
+    out_dir = tmp_path / "model_outputs"
+    out_dir.mkdir()
+    # pass explicit output path to match production usage
+    train_model(0.05, X_train, X_test, y_train, y_test, str(out_dir))
 
     for metric in ("accuracy", "precision", "recall", "f1"):
         assert metric in logged and len(logged[metric]) >= 1
         val = logged[metric][-1]
         assert isinstance(val, (int, float))
         assert 0.0 <= float(val) <= 1.0
+
+    # optional: assert artifacts were created (supports .pkl or .joblib)
+    assert (out_dir / "model.pkl").exists() or (out_dir / "model.joblib").exists()
+    assert (out_dir / "metrics.json").exists()
