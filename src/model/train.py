@@ -35,7 +35,7 @@ def main(args):
     logger.info("Starting training run")
     logger.info("Arguments: %s", args)
 
-    # Determine output folder: prefer args.output, fallback to env vars Azure ML sets
+    # Determine output folder: prefer args.output
     env_output = (
         os.environ.get("AZURE_ML_OUTPUT_model")
         or os.environ.get("AZURE_ML_OUTPUT_MODEL")
@@ -46,7 +46,7 @@ def main(args):
 
     # log & print resolved path so you can find it in container logs
     logger.info("Resolved output path: %s (args.output=%s env_output=%s)", 
-                out_path, args.output, env_output)
+        out_path, args.output, env_output)
     print("OUTPUT_PATH_IN_CONTAINER=", out_path, flush=True)
 
     # create marker (so you can see it in uploads)
@@ -56,8 +56,7 @@ def main(args):
             fh.write("written_by_train.py\n")
         logger.info("Wrote RUN_MARKER.txt to output folder")
     except Exception as e:
-        logger.warning("Failed to create marker " \
-        "file in output folder: %s", e)
+        logger.warning("Failed marker file in output folder: %s", e)
 
     # read data
     df = get_csvs_df(args.training_data)
@@ -76,7 +75,7 @@ def main(args):
     # final listing to ensure we see what was created (printed to stdout)
     try:
         files = os.listdir(out_path)
-        logger.info("Final contents of output folder (%s): %s", out_path, files)
+        logger.info(" contents of output (%s): %s", out_path, files)
         print("OUTPUT_DIR_LISTING=", files, flush=True)
     except Exception as e:
         logger.warning("Failed to list output dir contents: %s", e)
