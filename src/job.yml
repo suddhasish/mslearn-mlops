@@ -1,7 +1,7 @@
 $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
-code: model
+code: .
 command: >-
-  python train.py
+  python src/model/train.py
   --training_data ${{inputs.training_data}}
   --reg_rate 0.01
   --target_col None

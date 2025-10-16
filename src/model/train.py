@@ -30,27 +30,63 @@ logger = logging.getLogger(__name__)
 
 
 def main(args):
-    # TO DO: enable autologging
-    # 🟥 >>> ADDED CODE START
+    # Enable autologging
     mlflow.autolog()
     logger.info("Starting training run")
     logger.info("Arguments: %s", args)
-    # 🟥 >>> ADDED CODE END
+
+    # Determine output folder: prefer args.output
+    env_output = (
+        os.environ.get("AZURE_ML_OUTPUT_model")
+        or os.environ.get("AZURE_ML_OUTPUT_MODEL")
+    )
+    out_path = args.output if args.output else env_output
+    if not out_path:
+        out_path = "outputs/model"  # final fallback for local runs/tests
+
+    # log & print resolved path so you can find it in container logs
+    logger.info(
+        "Resolved output path: %s (args.output=%s env_output=%s)",
+        out_path,
+        args.output,
+        env_output,
+    )
+    print("OUTPUT_PATH_IN_CONTAINER=", out_path, flush=True)
+
+    # create marker (so you can see it in uploads)
+    try:
+        os.makedirs(out_path, exist_ok=True)
+        with open(os.path.join(out_path, "RUN_MARKER.txt"), "w") as fh:
+            fh.write("written_by_train.py\n")
+        logger.info("Wrote RUN_MARKER.txt to output folder")
+    except Exception as e:
+        logger.warning("Failed to create markerfile in output folder: %s", e)
 
     # read data
     df = get_csvs_df(args.training_data)
 
     # split data
-    # 🟥 >>> ADDED CODE START
     X_train, X_test, y_train, y_test = split_data(
         df,
         target_col=args.target_col,
         test_size=args.test_size,
         random_state=args.random_state,
     )
-    # 🟥 >>> ADDED CODE END
+
     # train model
-    train_model(args.reg_rate, X_train, X_test, y_train, y_test, args.output)
+    train_model(args.reg_rate, X_train, X_test, y_train, y_test, out_path)
+
+    # final listing to ensure we see what was created (printed to stdout)
+    try:
+        files = os.listdir(out_path)
+        logger.info(
+            "Final contents of output folder (%s): %s",
+            out_path,
+            files,
+        )
+        print("OUTPUT_DIR_LISTING=", files, flush=True)
+    except Exception as e:
+        logger.warning("Failed to list output dir contents: %s", e)
 
 
 def get_csvs_df(path):
@@ -58,17 +94,15 @@ def get_csvs_df(path):
         raise RuntimeError(
             f"Cannot use non-existent path provided: {path}"
         )
-    csv_files = glob.glob(f"{path}/*.csv")
+    csv_files = glob.glob(os.path.join(path, "*.csv"))
     if not csv_files:
         raise RuntimeError(
             f"No CSV files found in provided data path: {path}"
         )
     return pd.concat((pd.read_csv(f) for f in csv_files), sort=False)
 
+
 # 🟥 >>> ADDED CODE START
-# TO DO: add function to split data
-
-
 def split_data(
     df, target_col: str = None, test_size: float = 0.2, random_state: int = 42
 ):
@@ -106,10 +140,10 @@ def split_data(
     )
 
     return X_train, X_test, y_train, y_test
+# 🟥 >>> ADDED CODE END
 
 
 def train_model(reg_rate, X_train, X_test, y_train, y_test, output_dir: str):
-    # 🟥 >>> ADDED CODE START
     logger.info("Training model with reg_rate=%s", reg_rate)
     clf = LogisticRegression(C=1 / reg_rate, solver="liblinear").fit(
         X_train, y_train
@@ -151,17 +185,18 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test, output_dir: str):
         mlflow.log_metric("f1", f1)
     except Exception as e:
         logger.warning("MLflow logging failed: %s", e)
-# 🟥 >>> ADDED CODE END
+
     # -------------------------
-    # Save model and metrics to outputs/model/
+    # Save model and metrics to provided output_dir
     # -------------------------
-    out_dir = "outputs/model"
+    out_dir = output_dir if output_dir else "outputs/model"
     os.makedirs(out_dir, exist_ok=True)
 
     model_path = os.path.join(out_dir, "model.pkl")
     try:
         joblib.dump(clf, model_path)
         logger.info("Saved model to %s", model_path)
+        print("SAVED_MODEL_AT=", model_path, flush=True)
     except Exception as e:
         logger.warning("Failed to save model: %s", e)
 
@@ -183,12 +218,12 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test, output_dir: str):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--training_data", dest="training_data", type=str
+        "--training_data", dest="training_data", type=str, required=True
     )
     parser.add_argument(
         "--reg_rate", dest="reg_rate", type=float, default=0.01
     )
-# 🟥 >>> ADDED CODE START
+    # 🟥 >>> ADDED CODE START
     parser.add_argument(
         "--target_col", dest="target_col", type=str, default=None
     )
@@ -199,10 +234,10 @@ def parse_args():
         "--random_state", dest="random_state", type=int, default=42
     )
     parser.add_argument(
-        "--output", dest="output", type=str, default="outputs/model",
+        "--output", dest="output", type=str, default=None,
         help="For Azure ML outputs use ${{outputs.model}}"
     )
-# 🟥 >>> ADDED CODE END
+    # 🟥 >>> ADDED CODE END
     args = parser.parse_args()
     return args
 
