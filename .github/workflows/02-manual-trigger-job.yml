@@ -126,48 +126,55 @@ jobs:
           echo "Submitted job id: $JOB_ID"
           echo "Azure ML Studio URL (open in browser): https://ml.azure.com/jobs/$JOB_ID?workspaceName=$AZURE_ML_WORKSPACE_NAME"
 
-      - name: Wait for job completion (polling)
+      - name: Wait for Azure ML job to finish (poll)
         run: |
           set -euo pipefail
+
           JOB_ID=${{ steps.submit_job.outputs.job_id }}
-          echo "Monitoring job: $JOB_ID"
+          echo "Polling status for Azure ML job: $JOB_ID"
 
-          # Terminal states returned by az ml job show: Completed, Failed, Canceled, Running, NotStarted, etc.
-          TERMINAL_STATES="Completed Failed Canceled"
-          POLL_INTERVAL=20   # seconds between polls
-          MAX_MINUTES=120    # safety timeout (adjust as needed)
-          MAX_ITER=$(( (MAX_MINUTES * 60) / POLL_INTERVAL ))
-          i=0
+          # configurable (seconds)
+          INTERVAL=${{ env.POLL_INTERVAL_SECONDS || 20 }}
+          # max minutes to wait (adjust as needed)
+          MAX_MINUTES=${{ env.POLL_TIMEOUT_MINUTES || 120 }}
+          MAX_TRIES=$(( (MAX_MINUTES * 60) / INTERVAL ))
 
+          tries=0
           while true; do
-            ((i++))
-            status=$(az ml job show --name "$JOB_ID" --resource-group "$AZURE_ML_RESOURCE_GROUP" --workspace-name "$AZURE_ML_WORKSPACE_NAME" --subscription "$AZURE_SUBSCRIPTION_ID" --query "status" -o tsv 2>/dev/null || echo "Unknown")
-            timestamp=$(date --iso-8601=seconds)
-            echo "[$timestamp] Job status: $status (poll #$i)"
-            if [[ "$status" == "Completed" ]]; then
-              echo "Job completed successfully."
+            ((tries++))
+            STATUS=$(az ml job show \
+              --name "$JOB_ID" \
+              --resource-group "$AZURE_ML_RESOURCE_GROUP" \
+              --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
+              --subscription "$AZURE_SUBSCRIPTION_ID" \
+              --query "status" -o tsv 2>/dev/null || echo "Unknown")
+            echo "$(date --iso-8601=seconds) - status=${STATUS} (try=${tries}/${MAX_TRIES})"
+
+            if [ "$STATUS" = "Completed" ]; then
+              echo "✅ Job completed."
               break
             fi
-            if [[ "$status" == "Failed" ]] || [[ "$status" == "Canceled" ]] || [[ "$status" == "Cancelled" ]]; then
-              echo "Job finished in terminal state: $status" >&2
-              echo "Full job JSON:"
+
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Canceled" ] || [ "$STATUS" = "Cancelled" ]; then
+              echo "❌ Job ended in terminal state: $STATUS" >&2
+              echo "Full job JSON for debugging:"
               az ml job show --name "$JOB_ID" --resource-group "$AZURE_ML_RESOURCE_GROUP" --workspace-name "$AZURE_ML_WORKSPACE_NAME" --subscription "$AZURE_SUBSCRIPTION_ID" -o json || true
-              echo "Attempting to fetch tail of user logs (if available)..."
-              az ml job download --name "$JOB_ID" --path azureml-logs/user_logs/std_log.txt --download-path job_logs --resource-group "$AZURE_ML_RESOURCE_GROUP" --workspace-name "$AZURE_ML_WORKSPACE_NAME" --subscription "$AZURE_SUBSCRIPTION_ID" || true
-              if [[ -f job_logs/std_log.txt ]]; then
-                echo "---- tail of std_log.txt ----"
-                tail -n 200 job_logs/std_log.txt || true
-                echo "---- end of std_log.txt ----"
-              fi
               exit 1
             fi
-            if [[ $i -ge $MAX_ITER ]]; then
-              echo "Timed out waiting for job to finish after ${MAX_MINUTES} minutes." >&2
+
+            if [ "$STATUS" = "Unknown" ]; then
+              echo "Warning: could not fetch job status (got 'Unknown'); continuing to poll..."
+            fi
+
+            if [ "$tries" -ge "$MAX_TRIES" ]; then
+              echo "⏳ Timed out waiting for job after ${MAX_MINUTES} minutes." >&2
               az ml job show --name "$JOB_ID" --resource-group "$AZURE_ML_RESOURCE_GROUP" --workspace-name "$AZURE_ML_WORKSPACE_NAME" --subscription "$AZURE_SUBSCRIPTION_ID" -o json || true
               exit 2
             fi
-            sleep $POLL_INTERVAL
+
+            sleep "$INTERVAL"
           done
+
 
       - name: Download job outputs (model)
         run: |
