@@ -155,7 +155,7 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test):
     # -------------------------
     # Save model and metrics to outputs/model/
     # -------------------------
-    out_dir = "outputs/model"
+    out_dir = output_dir if output_dir else "outputs/model"
     os.makedirs(out_dir, exist_ok=True)
 
     model_path = os.path.join(out_dir, "model.pkl")
