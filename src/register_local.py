@@ -68,8 +68,8 @@ def main() -> int:
         help="Azure ML workspace name",
     )
     parser.add_argument(
-        "--force", 
-        action="store_true", 
+        "--force",
+        action="store_true",
         help="Force registration"
     )
     args = parser.parse_args()
