@@ -36,13 +36,13 @@ def main(args):
     logger.info("Arguments: %s", args)
 
     # Determine output folder: prefer args.output
-    env_output = (
-        os.environ.get("AZURE_ML_OUTPUT_model")
-        or os.environ.get("AZURE_ML_OUTPUT_MODEL")
-    )
-    out_path = args.output if args.output else env_output
-    if not out_path:
-        out_path = "outputs/model"  # final fallback for local runs/tests
+    #env_output = (
+    #    os.environ.get("AZURE_ML_OUTPUT_model")
+    #    or os.environ.get("AZURE_ML_OUTPUT_MODEL")
+    #)
+    out_path = args.output if args.output else "outputs/model"
+    #if not out_path:
+    #    out_path = "outputs/model"  # final fallback for local runs/tests
 
     # log & print resolved path so you can find it in container logs
     logger.info(
