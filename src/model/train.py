@@ -41,8 +41,7 @@ def main(args):
     logger.info(
         "Resolved output path: %s (args.output=%s env_output=%s)",
         out_path,
-        args.output,
-        env_output,
+        args.output
     )
     print("OUTPUT_PATH_IN_CONTAINER=", out_path, flush=True)
 
