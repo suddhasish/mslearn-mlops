@@ -1,3 +1,4 @@
+# File: src/register_local.py
 #!/usr/bin/env python3
 """
 Register a local model directory with Azure ML Model Registry.
@@ -37,10 +38,24 @@ def load_metrics(metrics_path: str) -> dict:
 
 def main() -> int:
     """Command-line entrypoint for register_local."""
-    parser = argparse.ArgumentParser(description="Register local model directory.")
-    parser.add_argument("--model_dir", required=True, help="Local folder containing model files")
-    parser.add_argument("--model_name", required=True, help="Model registry name")
-    parser.add_argument("--primary_metric", default="f1", help="Primary metric key")
+    parser = argparse.ArgumentParser(
+        description="Register local model directory."
+    )
+    parser.add_argument(
+        "--model_dir",
+        required=True,
+        help="Local folder containing model files",
+    )
+    parser.add_argument(
+        "--model_name",
+        required=True,
+        help="Model registry name",
+    )
+    parser.add_argument(
+        "--primary_metric",
+        default="f1",
+        help="Primary metric key",
+    )
     parser.add_argument(
         "--subscription_id",
         default=os.environ.get("AZURE_SUBSCRIPTION_ID"),
@@ -69,23 +84,31 @@ def main() -> int:
     mlfpath = os.path.join(args.model_dir, "mlflow_run_id.txt")
     if os.path.exists(mlfpath):
         try:
-            tag_metrics["mlflow_run_id"] = open(mlfpath, "r", encoding="utf8").read().strip()
+            tag_metrics["mlflow_run_id"] = (
+                open(mlfpath, "r", encoding="utf8").read().strip()
+            )
         except Exception:
             # non-fatal: skip mlflow id if reading fails
             pass
 
-    if not (args.subscription_id and args.resource_group and args.workspace):
+    if not (
+        args.subscription_id and args.resource_group and args.workspace
+    ):
         print("subscription/resource_group/workspace missing", file=sys.stderr)
         return 3
 
     cred = AzureCliCredential()
-    ml_client = MLClient(cred, args.subscription_id, args.resource_group, args.workspace)
+    ml_client = MLClient(
+        cred, args.subscription_id, args.resource_group, args.workspace
+    )
 
     model_asset = Model(
         name=args.model_name,
         path=args.model_dir,
         type="custom_model",
-        description=f"Registered from CI (primary_metric={args.primary_metric})",
+        description=(
+            "Registered from CI (primary_metric=" + args.primary_metric + ")"
+        ),
         tags=tag_metrics,
     )
 
