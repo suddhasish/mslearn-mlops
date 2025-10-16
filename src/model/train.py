@@ -200,7 +200,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output", dest="output", type=str, default="outputs/model",
-        help="Local path to write model artifacts. For Azure ML outputs use ${{outputs.model}}"
+        help="For Azure ML outputs use ${{outputs.model}}"
     )
 # 🟥 >>> ADDED CODE END
     args = parser.parse_args()
