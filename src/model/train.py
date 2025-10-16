@@ -152,8 +152,7 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test):
     except Exception as e:
         logger.warning("MLflow logging failed: %s", e)
 # 🟥 >>> ADDED CODE END
-
-
+    
     # -------------------------
     # Save model and metrics to outputs/model/
     # -------------------------
