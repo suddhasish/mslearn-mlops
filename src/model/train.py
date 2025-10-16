@@ -108,7 +108,7 @@ def split_data(
     return X_train, X_test, y_train, y_test
 
 
-def train_model(reg_rate, X_train, X_test, y_train, y_test, output_dir: str)):
+def train_model(reg_rate, X_train, X_test, y_train, y_test, output_dir: str):
     # 🟥 >>> ADDED CODE START
     logger.info("Training model with reg_rate=%s", reg_rate)
     clf = LogisticRegression(C=1 / reg_rate, solver="liblinear").fit(
