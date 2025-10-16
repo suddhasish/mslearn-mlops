@@ -9,6 +9,8 @@ from sklearn.linear_model import LogisticRegression
 
 # 🟥 >>> ADDED CODE START
 import logging
+import json
+import joblib
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
@@ -150,6 +152,32 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test):
     except Exception as e:
         logger.warning("MLflow logging failed: %s", e)
 # 🟥 >>> ADDED CODE END
+    # -------------------------
+    # Save model and metrics to outputs/model/
+    # -------------------------
+    out_dir = "outputs/model"
+    os.makedirs(out_dir, exist_ok=True)
+
+    model_path = os.path.join(out_dir, "model.joblib")
+    try:
+        joblib.dump(clf, model_path)
+        logger.info("Saved model to %s", model_path)
+    except Exception as e:
+        logger.warning("Failed to save model: %s", e)
+
+    metrics = {
+        "accuracy": float(acc),
+        "precision": float(prec),
+        "recall": float(rec),
+        "f1": float(f1),
+    }
+    metrics_path = os.path.join(out_dir, "metrics.json")
+    try:
+        with open(metrics_path, "w") as fh:
+            json.dump(metrics, fh)
+        logger.info("Saved metrics to %s", metrics_path)
+    except Exception as e:
+        logger.warning("Failed to save metrics: %s", e)
 
 
 def parse_args():
