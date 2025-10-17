@@ -1,4 +1,5 @@
-name: CI & Trigger Azure ML job
+name: CI & Trigger Azure ML job (train + approve + register)
+
 on:
   workflow_dispatch:
   pull_request:
@@ -11,14 +12,13 @@ permissions:
 env:
   AZURE_ML_RESOURCE_GROUP: ${{ secrets.AZURE_ML_RESOURCE_GROUP }}
   AZURE_ML_WORKSPACE_NAME: ${{ secrets.AZURE_ML_WORKSPACE_NAME }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   JOB_YML: src/job.yml
-  # Optional override for training data path
   TRAINING_DATA: ${{ secrets.AZURE_ML_TRAINING_DATA_PATH || '' }}
+  MODEL_NAME: diabetes_classification
+  PRIMARY_METRIC: f1
 
 jobs:
-  # ---------------------
-  # Lint job (runs on PRs)
-  # ---------------------
   lint:
     name: Flake8 lint
     runs-on: ubuntu-latest
@@ -38,23 +38,18 @@ jobs:
             python -m pip install --upgrade pip
             python -m pip install -r requirements.txt
           fi
-          # ensure flake8 is available
           python -m pip install flake8
 
       - name: Run flake8
         run: |
-          # Lint source and tests folders; adjust paths if needed
           echo "Running flake8 on src/ and tests/"
           python -m flake8 src/ tests/ || (echo "Flake8 found issues" && exit 1)
 
-  # --------------------
-  # Tests job (runs on PRs)
-  # --------------------
   test:
     name: Pytest unit tests
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    needs: lint   # optional: run tests after lint passes; remove if you want parallel
+    needs: lint
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
@@ -70,13 +65,12 @@ jobs:
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           fi
-          # ensure pytest is available
           python -m pip install pytest pytest-cov
 
       - name: Run pytest
         run: |
-          # Run tests and produce junit xml for CI parsing if desired
           pytest -q --junitxml=reports/junit.xml -o log_cli=true -o log_cli_level=INFO
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -84,17 +78,15 @@ jobs:
           name: pytest-reports
           path: reports/
 
-  # --------------------
-  # Submit AML job (manual only)
-  # --------------------
   submit-aml-job:
-    name: Submit Azure ML job
+    name: Submit & monitor AML job, download outputs, compare metrics
     runs-on: ubuntu-latest
-    # Only run the submit job when the workflow is manually dispatched.
-    #if: github.event_name == 'workflow_dispatch'
-    needs: [lint, test]   # optional: require lint & tests to pass before manual submission; remove if not desired
+    needs: [lint, test]
+    outputs:
+      job_id: ${{ steps.submit_job.outputs.job_id }}
+      improved: ${{ steps.set_improved.outputs.improved }}
     steps:
-      - name: Check out repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install prerequisites (Azure CLI + jq)
@@ -107,13 +99,10 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Install Azure ML extension
+      - name: Install Azure ML CLI extension
         run: |
           az extension remove -n ml || true
-          az extension add -n ml --upgrade
-
-      - name: Show Azure & ML versions
-        run: |
+          az extension add -n ml --upgrade || true
           az --version
           az ml -h
 
@@ -121,7 +110,7 @@ jobs:
         id: submit_job
         run: |
           echo "Submitting job from $JOB_YML"
-          CMD="az ml job create --file \"$JOB_YML\" --resource-group \"$AZURE_ML_RESOURCE_GROUP\" --workspace-name \"$AZURE_ML_WORKSPACE_NAME\" -o json"
+          CMD="az ml job create --file \"$JOB_YML\" --resource-group \"$AZURE_ML_RESOURCE_GROUP\" --workspace-name \"$AZURE_ML_WORKSPACE_NAME\" --subscription $AZURE_SUBSCRIPTION_ID -o json"
           if [ -n "${TRAINING_DATA}" ]; then
             echo "Overriding inputs.training_data.path with: ${TRAINING_DATA}"
             CMD="$CMD --set inputs.training_data.path='${TRAINING_DATA}'"
@@ -137,12 +126,121 @@ jobs:
           echo "Submitted job id: $JOB_ID"
           echo "Azure ML Studio URL (open in browser): https://ml.azure.com/jobs/$JOB_ID?workspaceName=$AZURE_ML_WORKSPACE_NAME"
 
-      - name: Print job link
+      - name: Wait for job completion
         run: |
-          echo "Job ID: ${{ steps.submit_job.outputs.job_id }}"
-          echo "Open in Azure ML Studio: https://ml.azure.com/jobs/${{ steps.submit_job.outputs.job_id }}?workspaceName=${{ env.AZURE_ML_WORKSPACE_NAME }}"
+          JOB_ID=${{ steps.submit_job.outputs.job_id }}
+          echo "Waiting for job completion..."
+          STATUS="Running"
+          while [ "$STATUS" = "Running" ] || [ "$STATUS" = "Queued" ] || [ "$STATUS" = "Preparing" ]; do
+            STATUS=$(az ml job show --name "$JOB_ID" \
+              --resource-group "$AZURE_ML_RESOURCE_GROUP" \
+              --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
+              --subscription "$AZURE_SUBSCRIPTION_ID" \
+              --query "status" -o tsv)
+            echo "Status: $STATUS"
+            sleep 60
+          done
+          if [ "$STATUS" != "Completed" ]; then
+            echo "❌ Job failed with status $STATUS"
+            exit 1
+          fi
 
-      - name: Success message
-        if: always()
+      - name: Download job outputs (model)
         run: |
-          echo "Workflow finished. Submitted job id: ${{ steps.submit_job.outputs.job_id }}"
+          set -euo pipefail
+          JOB_ID=${{ steps.submit_job.outputs.job_id }}
+          echo "Downloading outputs for job: $JOB_ID"
+
+          mkdir -p downloaded_model
+
+          # Download only the "model" output from the job (use output key defined in job YAML)
+          az ml job download \
+            --name "$JOB_ID" \
+            --output-name model \
+            --download-path downloaded_model \
+            --resource-group "$AZURE_ML_RESOURCE_GROUP" \
+            --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
+            --subscription "$AZURE_SUBSCRIPTION_ID" || true
+
+          # CLI sometimes nests files under downloaded_model/model or downloaded_model/outputs/model
+          # copy any metrics.json and model files out of nested folders into downloaded_model root
+          find downloaded_model -type f -name "metrics.json" -exec cp {} downloaded_model/ \; || true
+          find downloaded_model -type f -name "model.pkl" -exec cp {} downloaded_model/ \; || true
+
+          # show what we found
+          echo "Listing downloaded_model contents:"
+          find downloaded_model -maxdepth 3 -type f -printf '%p %s bytes\n' || true
+          ls -la downloaded_model || true
+
+
+      - name: Upload downloaded model as artifact for later jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloaded_model
+          path: downloaded_model
+
+      - name: Install Python deps for compare script
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade azure-ai-ml azure-identity
+
+      - name: Run compare_metrics.py to see if F1 improved
+        id: compare_metrics
+        run: |
+          python src/compare_metrics.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.AZURE_ML_RESOURCE_GROUP }}" --workspace "${{ env.AZURE_ML_WORKSPACE_NAME }}"
+          cat improved.txt || true
+
+      - name: Set improved output for job
+        id: set_improved
+        run: |
+          if [ -f improved.txt ]; then
+            IMPROVED=$(cat improved.txt)
+          else
+            IMPROVED=false
+          fi
+          echo "improved=$IMPROVED" >> $GITHUB_OUTPUT
+          echo "Improved: $IMPROVED"
+
+  approval:
+    name: Manual approval (only when improvement detected)
+    needs: submit-aml-job
+    runs-on: ubuntu-latest
+    if: needs.submit-aml-job.outputs.improved == 'true'
+    environment:
+      name: model-registration
+    steps:
+      - name: Approval placeholder
+        run: |
+          echo "Model improvement detected. Waiting for manual approval in GitHub environment 'model-registration'."
+          echo "Proceeding to registration after approval."
+
+  register-model:
+    name: Register model (runs after approval)
+    needs: [submit-aml-job, approval]
+    runs-on: ubuntu-latest
+    if: needs.submit-aml-job.outputs.improved == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifact (downloaded_model)
+        uses: actions/download-artifact@v4
+        with:
+          name: downloaded_model
+          path: downloaded_model
+
+      - name: Install prerequisites for registration
+        run: |
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          sudo apt-get update && sudo apt-get install -y jq
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade azure-ai-ml azure-identity
+
+      - name: Azure login (Service Principal) for register step
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Register the model locally (register_local.py)
+        run: |
+          python src/register_local.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.AZURE_ML_RESOURCE_GROUP }}" --workspace "${{ env.AZURE_ML_WORKSPACE_NAME }}"
