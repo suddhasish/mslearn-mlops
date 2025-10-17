@@ -126,55 +126,23 @@ jobs:
           echo "Submitted job id: $JOB_ID"
           echo "Azure ML Studio URL (open in browser): https://ml.azure.com/jobs/$JOB_ID?workspaceName=$AZURE_ML_WORKSPACE_NAME"
 
-      - name: Wait for Azure ML job to finish (poll)
+      - name: Wait for job completion
         run: |
-          set -euo pipefail
-
-          JOB_ID=${{ steps.submit_job.outputs.job_id }}
-          echo "Polling status for Azure ML job: $JOB_ID"
-
-          # configurable (seconds)
-          INTERVAL=${{ env.POLL_INTERVAL_SECONDS || 20 }}
-          # max minutes to wait (adjust as needed)
-          MAX_MINUTES=${{ env.POLL_TIMEOUT_MINUTES || 120 }}
-          MAX_TRIES=$(( (MAX_MINUTES * 60) / INTERVAL ))
-
-          tries=0
-          while true; do
-            ((tries++))
-            STATUS=$(az ml job show \
-              --name "$JOB_ID" \
+          JOB_ID=${{ steps.train.outputs.job_id }}
+          echo "Waiting for job completion..."
+          STATUS="Running"
+          while [ "$STATUS" = "Running" ] || [ "$STATUS" = "Queued" ]; do
+            STATUS=$(az ml job show --name "$JOB_ID" \
               --resource-group "$AZURE_ML_RESOURCE_GROUP" \
               --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
-              --subscription "$AZURE_SUBSCRIPTION_ID" \
-              --query "status" -o tsv 2>/dev/null || echo "Unknown")
-            echo "$(date --iso-8601=seconds) - status=${STATUS} (try=${tries}/${MAX_TRIES})"
-
-            if [ "$STATUS" = "Completed" ]; then
-              echo "✅ Job completed."
-              break
-            fi
-
-            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Canceled" ] || [ "$STATUS" = "Cancelled" ]; then
-              echo "❌ Job ended in terminal state: $STATUS" >&2
-              echo "Full job JSON for debugging:"
-              az ml job show --name "$JOB_ID" --resource-group "$AZURE_ML_RESOURCE_GROUP" --workspace-name "$AZURE_ML_WORKSPACE_NAME" --subscription "$AZURE_SUBSCRIPTION_ID" -o json || true
-              exit 1
-            fi
-
-            if [ "$STATUS" = "Unknown" ]; then
-              echo "Warning: could not fetch job status (got 'Unknown'); continuing to poll..."
-            fi
-
-            if [ "$tries" -ge "$MAX_TRIES" ]; then
-              echo "⏳ Timed out waiting for job after ${MAX_MINUTES} minutes." >&2
-              az ml job show --name "$JOB_ID" --resource-group "$AZURE_ML_RESOURCE_GROUP" --workspace-name "$AZURE_ML_WORKSPACE_NAME" --subscription "$AZURE_SUBSCRIPTION_ID" -o json || true
-              exit 2
-            fi
-
-            sleep "$INTERVAL"
+              --query "status" -o tsv)
+            echo "Status: $STATUS"
+            sleep 60
           done
-
+          if [ "$STATUS" != "Completed" ]; then
+            echo "❌ Job failed with status $STATUS"
+            exit 1
+          fi
 
       - name: Download job outputs (model)
         run: |
