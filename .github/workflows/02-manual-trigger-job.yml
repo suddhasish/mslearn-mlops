@@ -128,7 +128,7 @@ jobs:
 
       - name: Wait for job completion
         run: |
-          JOB_ID=${{ steps.train.outputs.job_id }}
+          JOB_ID=${{ steps.submit_job.outputs.job_id }}
           echo "Waiting for job completion..."
           STATUS="Running"
           while [ "$STATUS" = "Running" ] || [ "$STATUS" = "Queued" ]; do
