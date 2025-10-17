@@ -131,7 +131,7 @@ jobs:
           JOB_ID=${{ steps.submit_job.outputs.job_id }}
           echo "Waiting for job completion..."
           STATUS="Running"
-          while [ "$STATUS" = "Running" ] || [ "$STATUS" = "Queued" ]; do
+          while [ "$STATUS" = "Running" ] || [ "$STATUS" = "Queued" ] || [ "$STATUS" = "Preparing" ]; do
             STATUS=$(az ml job show --name "$JOB_ID" \
               --resource-group "$AZURE_ML_RESOURCE_GROUP" \
               --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
