@@ -8,7 +8,6 @@ import json
 import os
 import sys
 from typing import Optional
-
 from azure.ai.ml import MLClient
 from azure.ai.ml.entities import Model
 from azure.identity import AzureCliCredential
