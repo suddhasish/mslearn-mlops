@@ -15,7 +15,7 @@ env:
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   JOB_YML: src/job.yml
   TRAINING_DATA: ${{ secrets.AZURE_ML_TRAINING_DATA_PATH || '' }}
-  MODEL_NAME: ${{ env.MODEL_NAME }}
+  MODEL_NAME: diabetes_classification
   PRIMARY_METRIC: f1
 
 jobs:
