@@ -163,14 +163,9 @@ jobs:
             --subscription "$AZURE_SUBSCRIPTION_ID" || true
 
           # CLI sometimes nests files under downloaded_model/model or downloaded_model/outputs/model
-          if [ -d downloaded_model/outputs/model ]; then
-            echo "Found nested downloaded_model/outputs/model -> copying up"
-            cp -r downloaded_model/outputs/model/* downloaded_model/ || true
-          fi
-          if [ -d downloaded_model/model ]; then
-            echo "Found nested downloaded_model/model -> copying up"
-            cp -r downloaded_model/model/* downloaded_model/ || true
-          fi
+          # copy any metrics.json and model files out of nested folders into downloaded_model root
+          find downloaded_model -type f -name "metrics.json" -exec cp {} downloaded_model/ \; || true
+          find downloaded_model -type f -name "model.pkl" -exec cp {} downloaded_model/ \; || true
 
           # show what we found
           echo "Listing downloaded_model contents:"
