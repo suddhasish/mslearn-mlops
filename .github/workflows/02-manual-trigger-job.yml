@@ -135,6 +135,7 @@ jobs:
             STATUS=$(az ml job show --name "$JOB_ID" \
               --resource-group "$AZURE_ML_RESOURCE_GROUP" \
               --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
+              --subscription "$AZURE_SUBSCRIPTION_ID" \
               --query "status" -o tsv)
             echo "Status: $STATUS"
             sleep 60
