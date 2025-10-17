@@ -147,16 +147,36 @@ jobs:
 
       - name: Download job outputs (model)
         run: |
+          set -euo pipefail
           JOB_ID=${{ steps.submit_job.outputs.job_id }}
+          echo "Downloading outputs for job: $JOB_ID"
+
           mkdir -p downloaded_model
-          echo "Downloading outputs/model from job $JOB_ID to downloaded_model/"
-          az ml job download --name $JOB_ID --path outputs/model --download-path downloaded_model --resource-group $AZURE_ML_RESOURCE_GROUP --workspace-name $AZURE_ML_WORKSPACE_NAME --subscription $AZURE_SUBSCRIPTION_ID || true
-          # normalize: if nested path exists, copy files to root downloaded_model/
+
+          # Download only the "model" output from the job (use output key defined in job YAML)
+          az ml job download \
+            --name "$JOB_ID" \
+            --output-name model \
+            --download-path downloaded_model \
+            --resource-group "$AZURE_ML_RESOURCE_GROUP" \
+            --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
+            --subscription "$AZURE_SUBSCRIPTION_ID" || true
+
+          # CLI sometimes nests files under downloaded_model/model or downloaded_model/outputs/model
           if [ -d downloaded_model/outputs/model ]; then
+            echo "Found nested downloaded_model/outputs/model -> copying up"
             cp -r downloaded_model/outputs/model/* downloaded_model/ || true
           fi
-          find downloaded_model -maxdepth 3 -type f -name "metrics.json" -print || true
+          if [ -d downloaded_model/model ]; then
+            echo "Found nested downloaded_model/model -> copying up"
+            cp -r downloaded_model/model/* downloaded_model/ || true
+          fi
+
+          # show what we found
+          echo "Listing downloaded_model contents:"
+          find downloaded_model -maxdepth 3 -type f -printf '%p %s bytes\n' || true
           ls -la downloaded_model || true
+
 
       - name: Upload downloaded model as artifact for later jobs
         uses: actions/upload-artifact@v4
@@ -172,7 +192,7 @@ jobs:
       - name: Run compare_metrics.py to see if F1 improved
         id: compare_metrics
         run: |
-          python compare_metrics.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.AZURE_ML_RESOURCE_GROUP }}" --workspace "${{ env.AZURE_ML_WORKSPACE_NAME }}"
+          python src/compare_metrics.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.AZURE_ML_RESOURCE_GROUP }}" --workspace "${{ env.AZURE_ML_WORKSPACE_NAME }}"
           cat improved.txt || true
 
       - name: Set improved output for job
@@ -228,4 +248,4 @@ jobs:
 
       - name: Register the model locally (register_local.py)
         run: |
-          python register_local.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.AZURE_ML_RESOURCE_GROUP }}" --workspace "${{ env.AZURE_ML_WORKSPACE_NAME }}"
+          python src/register_local.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.AZURE_ML_RESOURCE_GROUP }}" --workspace "${{ env.AZURE_ML_WORKSPACE_NAME }}"
