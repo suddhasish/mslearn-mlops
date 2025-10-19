@@ -13,16 +13,6 @@ from azure.ai.ml import MLClient
 from azure.identity import AzureCliCredential
 
 
-def parse_float(value: object) -> Optional[float]:
-    """Try to convert value to float; return None on failure."""
-    try:
-        if value is None:
-            return None
-        return float(value)
-    except Exception:
-        return None
-
-
 def parse_float(value) -> Optional[float]:
     """Safely convert strings or JSON-like values to float."""
     if value is None:
@@ -60,7 +50,8 @@ def get_best_existing_metric(
     try:
         for m in ml_client.models.list():  # type: ignore
             try:
-                # Ensure we only check the correct model name (case-insensitive)
+                # Ensure we only check the correct 
+                #model name (case-insensitive)
                 if str(getattr(m, "name", "")).lower() != model_name.lower():
                     continue
 
@@ -68,8 +59,15 @@ def get_best_existing_metric(
                 raw_val = tags.get(metric_key)
 
                 # Debug (optional)
-                print(f"DEBUG: model={m.name}, version={getattr(m, 'version', 'NA')}, "
-                      f"{metric_key}={raw_val}")
+                print(
+                    "DEBUG: model=%s, version=%s, %s=%s"
+                    % (
+                        m.name,
+                        getattr(m, "version", "NA"),
+                        metric_key,
+                        raw_val,
+                    )
+                )
 
                 val = parse_float(raw_val)
                 if val is not None and (best is None or val > best):
@@ -90,7 +88,6 @@ def get_best_existing_metric(
 
     print(f"Best existing {metric_key}: {best}")
     return best
-
 
 
 def main() -> int:
