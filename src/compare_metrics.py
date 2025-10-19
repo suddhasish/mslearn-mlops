@@ -99,30 +99,65 @@ def get_best_existing_metric(
 ) -> Optional[float]:
     """Return best numeric metric among registered models (or None)."""
     best: Optional[float] = None
+
+    # Try to call list() with a name filter if supported by SDK.
     try:
-        for model in ml_client.models.list():  # type: ignore
+        candidates = ml_client.models.list(name=model_name)  # type: ignore
+    except TypeError:
+        # Older SDK signatures may not accept 'name' arg; fall back to listing all.
+        candidates = ml_client.models.list()  # type: ignore
+
+    try:
+        for m in candidates:
             try:
-                name = getattr(model, "name", None)
-                if not name:
-                    continue
-                if (
-                    str(name).strip().lower()
-                    != model_name.strip().lower()
-                ):
+                # Each item from list() may be lightweight. Try to get name/version.
+                m_name = getattr(m, "name", None)
+                m_version = getattr(m, "version", None)
+
+                if not m_name:
+                    # Skip entries without names
                     continue
 
-                raw_tags = getattr(model, "tags", None)
-                normalized = _normalize_tags(raw_tags)
+                # If model name doesn't match exactly, skip.
+                if str(m_name).strip().lower() != model_name.strip().lower():
+                    continue
+
+                # Fetch the full model resource (tags often available only there).
+                full = None
+                try:
+                    if m_version:
+                        full = ml_client.models.get(name=m_name, version=m_version)
+                    else:
+                        # If version missing, try to get latest by name (may raise)
+                        full = ml_client.models.get(name=m_name)
+                except Exception:
+                    # If get fails, continue using the lightweight 'm' object.
+                    full = m
+
+                # Inspect tags / properties (prefer tags on full resource).
+                raw_tags = getattr(full, "tags", None)
+                raw_props = getattr(full, "properties", None)
+
+                # Debug — will show in CI logs; remove once verified.
+                print(
+                    "DEBUG: model=%s, version=%s, tags=%s, props=%s"
+                    % (str(m_name), str(m_version), str(raw_tags), str(raw_props))
+                )
+
+                # Normalize tags (keys lowercased, stripped)
+                normalized = {}
+                if isinstance(raw_tags, dict):
+                    for k, v in raw_tags.items():
+                        if k is None:
+                            continue
+                        nk = str(k).strip().lower()
+                        nv = None if v is None else str(v).strip().strip('"').strip("'")
+                        normalized[nk] = nv
 
                 lookup = metric_key.strip().lower()
                 raw_val = normalized.get(lookup)
                 if raw_val is None:
-                    for alt in (
-                        lookup,
-                        lookup.replace("-", "_"),
-                        "f1",
-                        "f1_score",
-                    ):
+                    for alt in (lookup, lookup.replace("-", "_"), "f1", "f1_score"):
                         raw_val = normalized.get(alt)
                         if raw_val is not None:
                             break
@@ -130,10 +165,19 @@ def get_best_existing_metric(
                 val = parse_float(raw_val)
                 if val is not None and (best is None or val > best):
                     best = val
+                    # keep checking other versions
                     continue
 
-                raw_props = getattr(model, "properties", {}) or {}
-                pnorm = _normalize_props(raw_props)
+                # Fallback to properties if present
+                pnorm = {}
+                if isinstance(raw_props, dict):
+                    for k, v in raw_props.items():
+                        try:
+                            k_norm = str(k).strip().lower()
+                        except Exception:
+                            k_norm = str(k)
+                        pnorm[k_norm] = v
+
                 p_raw = pnorm.get(lookup)
                 if p_raw is None:
                     for alt in ("f1", "f1_score"):
@@ -144,12 +188,13 @@ def get_best_existing_metric(
                 if val is not None and (best is None or val > best):
                     best = val
             except Exception:
+                # Skip single model errors; continue scanning others.
                 continue
     except Exception as exc:
         print("Warning: failed to list or parse models:", exc)
         return None
 
-    print(f"DEBUG: Best existing {metric_key}: {best}")
+    print("DEBUG: Best existing %s: %s" % (metric_key, str(best)))
     return best
 
 
