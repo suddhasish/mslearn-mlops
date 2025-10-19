@@ -23,6 +23,35 @@ def parse_float(value: object) -> Optional[float]:
         return None
 
 
+def parse_float(value) -> Optional[float]:
+    """Safely convert strings or JSON-like values to float."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        s = value.strip().strip('"').strip("'")
+        try:
+            return float(s)
+        except ValueError:
+            # handle JSON-like values e.g. '{"f1": "0.83"}'
+            import json
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, (int, float)):
+                    return float(parsed)
+                if isinstance(parsed, dict):
+                    # if tag is like {"f1": "0.83"}
+                    for v in parsed.values():
+                        try:
+                            return float(v)
+                        except Exception:
+                            continue
+            except Exception:
+                return None
+    return None
+
+
 def get_best_existing_metric(
     ml_client: MLClient, model_name: str, metric_key: str
 ) -> Optional[float]:
@@ -31,31 +60,37 @@ def get_best_existing_metric(
     try:
         for m in ml_client.models.list():  # type: ignore
             try:
-                if getattr(m, "name", None) != model_name:
+                # Ensure we only check the correct model name (case-insensitive)
+                if str(getattr(m, "name", "")).lower() != model_name.lower():
                     continue
+
                 tags = getattr(m, "tags", {}) or {}
-                if metric_key in tags:
-                    val = parse_float(tags.get(metric_key))
-                    if val is not None and (
-                        best is None or val > best
-                    ):
-                        best = val
-                        continue
-                props = getattr(m, "properties", None) or {}
-                if metric_key in props:
-                    val = parse_float(props.get(metric_key))
-                    if val is not None and (
-                        best is None or val > best
-                    ):
-                        best = val
-                        continue
+                raw_val = tags.get(metric_key)
+
+                # Debug (optional)
+                print(f"DEBUG: model={m.name}, version={getattr(m, 'version', 'NA')}, "
+                      f"{metric_key}={raw_val}")
+
+                val = parse_float(raw_val)
+                if val is not None and (best is None or val > best):
+                    best = val
+                    continue
+
+                # fallback to model properties (rarely used)
+                props = getattr(m, "properties", {}) or {}
+                raw_val = props.get(metric_key)
+                val = parse_float(raw_val)
+                if val is not None and (best is None or val > best):
+                    best = val
             except Exception:
-                # Skip entries that cause unexpected parsing errors.
                 continue
-    except Exception:
-        # If listing fails, return None to be conservative.
+    except Exception as e:
+        print(f"Warning: failed to list or parse models: {e}")
         return None
+
+    print(f"Best existing {metric_key}: {best}")
     return best
+
 
 
 def main() -> int:
