@@ -62,7 +62,6 @@ def _normalize_tags(raw_tags: Any) -> dict:
             val_norm = val_norm.strip('"').strip("'") if val_norm else val_norm
             out[key_norm] = val_norm
         return out
-    # fallback: try to parse stringy representations
     try:
         txt = str(raw_tags)
         parsed = json.loads(txt)
@@ -70,7 +69,8 @@ def _normalize_tags(raw_tags: Any) -> dict:
             for k, v in parsed.items():
                 if k is None:
                     continue
-                out[str(k).strip().lower()] = None if v is None else str(v).strip()
+                key = str(k).strip().lower()
+                out[key] = None if v is None else str(v).strip()
             return out
     except Exception:
         pass
@@ -201,7 +201,13 @@ def main() -> int:
     )
 
     print("New model metrics:", metrics)
-    print("Primary metric (%s) value: %s" % (args.primary_metric, str(new_val)))
+    print(
+        "Primary metric (%s) value: %s"
+        % (
+            args.primary_metric,
+            str(new_val),
+        )
+    )
 
     if not (args.subscription_id and args.resource_group and args.workspace):
         print(
@@ -217,14 +223,25 @@ def main() -> int:
     except Exception:
         cred = DefaultAzureCredential()
 
-    ml_client = MLClient(cred, args.subscription_id, args.resource_group, args.workspace)
+    ml_client = MLClient(
+        cred,
+        args.subscription_id,
+        args.resource_group,
+        args.workspace,
+    )
 
     existing_best = get_best_existing_metric(
-        ml_client, args.model_name, args.primary_metric
+        ml_client,
+        args.model_name,
+        args.primary_metric,
     )
     print(
         "Existing best %s for model '%s': %s"
-        % (args.primary_metric, args.model_name, str(existing_best))
+        % (
+            args.primary_metric,
+            args.model_name,
+            str(existing_best),
+        )
     )
 
     if existing_best is None:
