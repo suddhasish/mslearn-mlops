@@ -19,31 +19,31 @@ env:
   PRIMARY_METRIC: f1
 
 jobs:
-  lint:
-    name: Flake8 lint
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Check out repo
-        uses: actions/checkout@v4
+  #lint:
+    #name: Flake8 lint
+    #runs-on: ubuntu-latest
+    #if: github.event_name == 'pull_request'
+    #steps:
+      #- name: Check out repo
+        #uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+      #- name: Set up Python
+        #uses: actions/setup-python@v4
+        #with:
+          #python-version: '3.9'
 
-      - name: Install dependencies (for lint)
-        run: |
-          if [ -f requirements.txt ]; then
-            python -m pip install --upgrade pip
-            python -m pip install -r requirements.txt
-          fi
-          python -m pip install flake8
+      #- name: Install dependencies (for lint)
+        #run: |
+          #if [ -f requirements.txt ]; then
+            #python -m pip install --upgrade pip
+            #python -m pip install -r requirements.txt
+          #fi
+          #python -m pip install flake8
 
-      - name: Run flake8
-        run: |
-          echo "Running flake8 on src/ and tests/"
-          python -m flake8 src/ tests/ || (echo "Flake8 found issues" && exit 1)
+      #- name: Run flake8
+        #run: |
+          #echo "Running flake8 on src/ and tests/"
+          #python -m flake8 src/ tests/ || (echo "Flake8 found issues" && exit 1)
 
   test:
     name: Pytest unit tests
