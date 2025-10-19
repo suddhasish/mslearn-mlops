@@ -50,8 +50,8 @@ def get_best_existing_metric(
     try:
         for m in ml_client.models.list():  # type: ignore
             try:
-                # Ensure we only check the correct 
-                #model name (case-insensitive)
+                # Ensure we only check the correct
+                # model name (case-insensitive)
                 if str(getattr(m, "name", "")).lower() != model_name.lower():
                     continue
 
