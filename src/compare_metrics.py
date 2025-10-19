@@ -11,10 +11,7 @@ from typing import Optional
 
 from azure.ai.ml import MLClient
 from azure.identity import AzureCliCredential
-
-
 from typing import Optional, Any
-import json
 
 
 def _safe_parse_float(value: Any) -> Optional[float]:
@@ -29,7 +26,7 @@ def _safe_parse_float(value: Any) -> Optional[float]:
             return float(s)
         except ValueError:
             pass
-        # try JSON decode e.g. '{"f1": "0.83"}'
+        # try JSON decode (e.g. '{"f1": "0.83"}')
         try:
             parsed = json.loads(s)
             if isinstance(parsed, (int, float)):
@@ -46,39 +43,46 @@ def _safe_parse_float(value: Any) -> Optional[float]:
 
 
 def get_best_existing_metric(
-    ml_client, model_name: str, metric_key: str
+    ml_client,
+    model_name: str,
+    metric_key: str,
 ) -> Optional[float]:
     """Return the best numeric metric (or None) among registered models."""
     best: Optional[float] = None
     try:
-        for m in ml_client.models.list():  # type: ignore
+        for model in ml_client.models.list():  # type: ignore
             try:
-                name = getattr(m, "name", None)
+                name = getattr(model, "name", None)
                 if not name or str(name).strip().lower() != model_name.strip().lower():
                     continue
 
-                # show raw tags for debugging (remove after verifying)
-                raw_tags = getattr(m, "tags", None)
+                # Debug print — remove after verifying tag structure
+                raw_tags = getattr(model, "tags", None)
                 print("DEBUG: raw_tags:", raw_tags)
 
-                # Normalize keys: strip whitespace and lowercase
                 normalized = {}
                 if isinstance(raw_tags, dict):
-                    for k, v in raw_tags.items():
-                        if k is None:
+                    for key, val in raw_tags.items():
+                        if key is None:
                             continue
-                        norm_k = str(k).strip().lower()
-                        # normalize value to string without surrounding quotes
-                        norm_v = None if v is None else str(v).strip().strip('"').strip("'")
-                        normalized[norm_k] = norm_v
+                        norm_key = str(key).strip().lower()
+                        norm_val = (
+                            None
+                            if val is None
+                            else str(val).strip().strip('"').strip("'")
+                        )
+                        normalized[norm_key] = norm_val
 
-                # lookup metric_key in normalized tags (case-insensitive)
                 lookup_key = metric_key.strip().lower()
                 raw_val = normalized.get(lookup_key)
 
-                # If not present, also try some common alternates
                 if raw_val is None:
-                    for alt in (lookup_key, lookup_key.replace("-", "_"), "f1", "f1_score"):
+                    for alt in (
+                        lookup_key,
+                        lookup_key.replace("-", "_"),
+                        "f1",
+                        "f1_score",
+                    ):
                         raw_val = normalized.get(alt)
                         if raw_val is not None:
                             break
@@ -86,11 +90,9 @@ def get_best_existing_metric(
                 val = _safe_parse_float(raw_val)
                 if val is not None and (best is None or val > best):
                     best = val
-                    # continue to check other versions
                     continue
 
-                # fallback to properties if present (apply same normalization)
-                props = getattr(m, "properties", {}) or {}
+                props = getattr(model, "properties", {}) or {}
                 if isinstance(props, dict):
                     pnorm = {str(k).strip().lower(): v for k, v in props.items()}
                     p_raw = pnorm.get(lookup_key)
@@ -104,8 +106,8 @@ def get_best_existing_metric(
                         best = val
             except Exception:
                 continue
-    except Exception as e:
-        print("Warning: failed to list or parse models:", e)
+    except Exception as exc:
+        print("Warning: failed to list or parse models:", exc)
         return None
 
     print(f"DEBUG: Best existing {metric_key}: {best}")
