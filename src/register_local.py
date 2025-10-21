@@ -8,6 +8,8 @@ import json
 import os
 import sys
 from typing import Optional
+import glob
+
 from azure.ai.ml import MLClient
 from azure.ai.ml.entities import Model
 from azure.identity import AzureCliCredential
@@ -29,6 +31,20 @@ def load_metrics(metrics_path: str) -> dict:
         return {}
     with open(metrics_path, "r", encoding="utf8") as fh:
         return json.load(fh)
+
+
+def find_mlmodel(root: str) -> Optional[str]:
+    candidates = [
+        os.path.join(root, "MLmodel"),
+        os.path.join(root, "artifacts", "model", "MLmodel"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    for p in glob.glob(os.path.join(root, "**", "MLmodel"), recursive=True):
+        if os.path.isfile(p):
+            return p
+    return None
 
 
 def main() -> int:
@@ -83,9 +99,8 @@ def main() -> int:
     mlfpath = os.path.join(args.model_dir, "mlflow_run_id.txt")
     if os.path.exists(mlfpath):
         try:
-            tag_metrics["mlflow_run_id"] = (
-                open(mlfpath, "r", encoding="utf8").read().strip()
-            )
+            with open(mlfpath, "r", encoding="utf8") as fh:
+                tag_metrics["mlflow_run_id"] = fh.read().strip()
         except Exception:
             # non-fatal: skip mlflow id if reading fails
             pass
@@ -101,10 +116,15 @@ def main() -> int:
         cred, args.subscription_id, args.resource_group, args.workspace
     )
 
+    mlmodel_path = find_mlmodel(args.model_dir)
+    if mlmodel_path:
+        print(f"MLflow descriptor found at: {mlmodel_path}  -> registering as 'mlflow_model'")
+    model_type = "mlflow_model" if mlmodel_path else "custom_model"
+
     model_asset = Model(
         name=args.model_name,
         path=args.model_dir,
-        type="custom_model",
+        type=model_type,
         description=(
             "Registered from CI (primary_metric=" + args.primary_metric + ")"
         ),
