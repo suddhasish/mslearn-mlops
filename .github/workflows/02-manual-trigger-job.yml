@@ -231,7 +231,7 @@ jobs:
     name: Register model (runs after approval)
     needs: [submit-aml-job, approval]
     runs-on: ubuntu-latest
-    if: needs.submit-aml-job.outputs.improved == 'true'
+    #if: needs.submit-aml-job.outputs.improved == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
