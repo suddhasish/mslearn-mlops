@@ -163,28 +163,34 @@ jobs:
             --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
             --subscription "$AZURE_SUBSCRIPTION_ID" || true
 
-          # CLI sometimes nests files under downloaded_model/model or downloaded_model/outputs/model
-          # copy any metrics.json and model files out of nested folders into downloaded_model root
-          # Flatten only the nested "model" directory (common Azure ML CLI structure)
+          # Create target folder
+          mkdir -p downloaded_model/uploadartifact
 
-          # Some jobs nest even deeper: downloaded_model/outputs/model
-          if [ -d "downloaded_model/named-outputs/model" ]; then
-            echo "Flattening files from downloaded_model/named-outputs/model → downloaded_model/"
-            find downloaded_model/named-outputs/model -type f -exec cp {} downloaded_model/ \; || true
+          # Copy everything (recursively) from artifacts/model/
+          if [ -d "downloaded_model/artifacts/model" ]; then
+            echo "Copying MLflow model files from artifacts/model/"
+            cp -r downloaded_model/artifacts/model/* downloaded_model/uploadartifact/ || true
+          else
+            echo "Warning: downloaded_model/artifacts/model not found!"
           fi
 
-          # show what we found
-          echo "Listing downloaded_model contents:"
-          find downloaded_model -maxdepth 3 -type f -printf '%p %s bytes\n' || true
-          ls -la downloaded_model || true
-          find downloaded_model -type f -name "metrics.json" -exec cp {} downloaded_model/ \; || true
+          # Copy metrics.json from named-outputs/model (if exists)
+          if [ -f "downloaded_model/named-outputs/model/metrics.json" ]; then
+            echo "Copying metrics.json from named-outputs/model/"
+            cp downloaded_model/named-outputs/model/metrics.json downloaded_model/uploadartifact/ || true
+          else
+            echo "metrics.json not found under named-outputs/model/"
+          fi
 
+          # Show final contents
+          echo "Final contents of downloaded_model/uploadartifact:"
+          find downloaded_model/uploadartifact -type f -printf '%p %s bytes\n' || true
 
       - name: Upload downloaded model as artifact for later jobs
         uses: actions/upload-artifact@v4
         with:
           name: downloaded_model
-          path: downloaded_model
+          path: downloaded_model/uploadartifact
 
       - name: Install Python deps for compare script
         run: |
