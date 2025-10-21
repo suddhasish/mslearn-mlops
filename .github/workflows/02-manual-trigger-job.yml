@@ -164,13 +164,23 @@ jobs:
 
           # CLI sometimes nests files under downloaded_model/model or downloaded_model/outputs/model
           # copy any metrics.json and model files out of nested folders into downloaded_model root
-          find downloaded_model -type f -name "metrics.json" -exec cp {} downloaded_model/ \; || true
-          find downloaded_model -type f -name "model.pkl" -exec cp {} downloaded_model/ \; || true
+          # Flatten only the nested "model" directory (common Azure ML CLI structure)
+          if [ -d "downloaded_model/model" ]; then
+            echo "Flattening files from downloaded_model/model → downloaded_model/"
+            find downloaded_model/model -type f -exec cp {} downloaded_model/ \; || true
+          fi
+
+          # Some jobs nest even deeper: downloaded_model/outputs/model
+          if [ -d "downloaded_model/outputs/model" ]; then
+            echo "Flattening files from downloaded_model/outputs/model → downloaded_model/"
+            find downloaded_model/outputs/model -type f -exec cp {} downloaded_model/ \; || true
+          fi
 
           # show what we found
           echo "Listing downloaded_model contents:"
           find downloaded_model -maxdepth 3 -type f -printf '%p %s bytes\n' || true
           ls -la downloaded_model || true
+          find downloaded_model -type f -name "metrics.json" -exec cp {} downloaded_model/ \; || true
 
 
       - name: Upload downloaded model as artifact for later jobs
