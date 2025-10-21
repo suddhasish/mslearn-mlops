@@ -218,7 +218,7 @@ jobs:
     name: Manual approval (only when improvement detected)
     needs: submit-aml-job
     runs-on: ubuntu-latest
-    if: needs.submit-aml-job.outputs.improved == 'true'
+    #if: needs.submit-aml-job.outputs.improved == 'true'
     environment:
       name: model-registration
     steps:
