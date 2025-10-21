@@ -156,8 +156,8 @@ jobs:
           # Download only the "model" output from the job (use output key defined in job YAML)
           az ml job download \
             --all \
+            --verbose \
             --name "$JOB_ID" \
-            --output-name model \
             --download-path downloaded_model \
             --resource-group "$AZURE_ML_RESOURCE_GROUP" \
             --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
