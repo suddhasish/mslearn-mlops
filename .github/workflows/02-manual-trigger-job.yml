@@ -155,6 +155,7 @@ jobs:
 
           # Download only the "model" output from the job (use output key defined in job YAML)
           az ml job download \
+            --all \
             --name "$JOB_ID" \
             --output-name model \
             --download-path downloaded_model \
