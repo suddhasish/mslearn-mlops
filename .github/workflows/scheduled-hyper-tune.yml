@@ -1,0 +1,195 @@
+name: Scheduled Hyperparameter Tuning (Azure ML)
+
+# Runs on schedule and can be triggered manually
+on:
+  schedule:
+    # run once daily at 02:30 UTC by default (adjust cron as needed)
+    - cron: '30 2 * * *'
+  workflow_dispatch: {}
+
+env:
+  # Azure environment (set these in repo secrets or override here)
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_ML_RESOURCE_GROUP }}
+  AZURE_WORKSPACE: ${{ secrets.AZURE_ML_WORKSPACE_NAME }}
+
+  # Path to your sweep job YAML (must exist in repo)
+  SWEEP_YAML: src/hyperparameter_sweep.yml
+
+  # Where to download the best model
+  DOWNLOAD_PATH: downloaded_model
+
+  # upload artifact folder (what register_local.py will consume)
+  UPLOAD_ARTIFACT_DIR: downloaded_model/uploadartifact
+
+  # Polling behavior
+  POLL_INTERVAL_SECONDS: 60     # poll every 60s
+  POLL_MAX_MINUTES: 720        # give sweep up to 12 hours (adjust as needed)
+
+  # Resource-control knobs (you typically set these in the sweep YAML)
+  # They are here as env placeholders / for readability. Actual limits should be in SWEEP_YAML.
+  MAX_TOTAL_TRIALS: 20
+  MAX_CONCURRENT_TRIALS: 4
+  SWEEP_TIMEOUT_SECONDS: 3600
+
+jobs:
+  submit-and-monitor-sweep:
+    runs-on: ubuntu-latest
+    outputs:
+      best_trial_id: ${{ steps.get_best_id.outputs.best_trial_id }}
+      sweep_job_id: ${{ steps.submit.outputs.sweep_job_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install prerequisites (az cli + azure ml extension & jq)
+        run: |
+          set -euo pipefail
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          sudo apt-get update && sudo apt-get install -y jq
+          az extension remove -n ml || true
+          az extension add -n ml --upgrade || true
+          az --version
+
+      - name: Azure login (Service Principal)
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Submit sweep job
+        id: submit
+        run: |
+          set -euo pipefail
+          echo "Submitting sweep job from: $SWEEP_YAML"
+          SWEEP_JSON=$(az ml job create --file "$SWEEP_YAML" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --workspace-name "$AZURE_WORKSPACE" \
+            --subscription "$AZURE_SUBSCRIPTION_ID" -o json)
+          echo "$SWEEP_JSON" > sweep_submit_output.json
+          SWEEP_ID=$(echo "$SWEEP_JSON" | jq -r '.name')
+          echo "sweep_job_id=$SWEEP_ID" >> $GITHUB_OUTPUT
+          echo "Submitted sweep job id: $SWEEP_ID"
+
+      - name: Wait for sweep completion (poll)
+        id: wait
+        run: |
+          set -euo pipefail
+          SWEEP_ID=${{ steps.submit.outputs.sweep_job_id }}
+          if [ -z "$SWEEP_ID" ]; then
+            # fallback to reading from file for local runs
+            SWEEP_ID=$(jq -r '.name' sweep_submit_output.json)
+          fi
+          echo "Polling sweep job: $SWEEP_ID"
+
+          POLL_INTERVAL=${{ env.POLL_INTERVAL_SECONDS }}
+          MAX_MINUTES=${{ env.POLL_MAX_MINUTES }}
+          MAX_ITER=$(( MAX_MINUTES * 60 / POLL_INTERVAL ))
+          i=0
+          STATUS=""
+          while [ $i -le $MAX_ITER ]; do
+            STATUS=$(az ml job show --name "$SWEEP_ID" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --workspace-name "$AZURE_WORKSPACE" \
+              --subscription "$AZURE_SUBSCRIPTION_ID" \
+              --query "status" -o tsv 2>/dev/null || echo "Unknown")
+            echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Sweep status: $STATUS"
+            if [ "$STATUS" = "Completed" ] || [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Canceled" ]; then
+              break
+            fi
+            i=$((i+1))
+            sleep "$POLL_INTERVAL"
+          done
+
+          if [ "$STATUS" != "Completed" ]; then
+            echo "Sweep did not complete successfully. Final status: $STATUS"
+            exit 1
+          fi
+
+          echo "Sweep completed: $SWEEP_ID"
+          echo "sweep_job_id=$SWEEP_ID" >> $GITHUB_OUTPUT
+
+      - name: Get best trial id
+        id: get_best_id
+        run: |
+          set -euo pipefail
+          SWEEP_ID=${{ steps.submit.outputs.sweep_job_id }}
+          if [ -z "$SWEEP_ID" ]; then
+            SWEEP_ID=$(jq -r '.name' sweep_submit_output.json)
+          fi
+          echo "Retrieving best trial for sweep: $SWEEP_ID"
+          # property path used in CLI responses: properties.best_trial.id (fallbacks may vary)
+          BEST_TRIAL_ID=$(az ml job show --name "$SWEEP_ID" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --workspace-name "$AZURE_WORKSPACE" \
+            --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --query "properties.best_trial.id" -o tsv 2>/dev/null || true)
+
+          # fallback if the CLI returned empty - inspect whole job json and try alternate path
+          if [ -z "$BEST_TRIAL_ID" ]; then
+            JOB_JSON=$(az ml job show --name "$SWEEP_ID" --resource-group "$AZURE_RESOURCE_GROUP" --workspace-name "$AZURE_WORKSPACE" --subscription "$AZURE_SUBSCRIPTION_ID" -o json)
+            echo "$JOB_JSON" > sweep_job_full.json
+            # try a few likely fields
+            BEST_TRIAL_ID=$(jq -r '.best_trial.id // .properties.best_trial.id // empty' sweep_job_full.json || true)
+          fi
+
+          if [ -z "$BEST_TRIAL_ID" ] || [ "$BEST_TRIAL_ID" = "null" ]; then
+            echo "No best trial found in sweep job (no trials or sweep failed)."
+            echo "best_trial_id=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Best trial id: $BEST_TRIAL_ID"
+          echo "best_trial_id=$BEST_TRIAL_ID" >> $GITHUB_OUTPUT
+
+      - name: Download best trial model artifacts
+        if: steps.get_best_id.outputs.best_trial_id != ''
+        run: |
+          set -euo pipefail
+          BEST_TRIAL=${{ steps.get_best_id.outputs.best_trial_id }}
+          echo "Downloading model output for best trial: $BEST_TRIAL"
+          mkdir -p ${{ env.DOWNLOAD_PATH }}
+          az ml job download \
+            --name "$BEST_TRIAL" \
+            --output-name model \
+            --download-path "${{ env.DOWNLOAD_PATH }}" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --workspace-name "$AZURE_WORKSPACE" \
+            --subscription "$AZURE_SUBSCRIPTION_ID" || true
+
+          # Prepare uploadartifact folder (minimal copy)
+          mkdir -p "${{ env.UPLOAD_ARTIFACT_DIR }}"
+          # Copy everything from artifacts/model (MLflow model) if present
+          if [ -d "${{ env.DOWNLOAD_PATH }}/artifacts/model" ]; then
+            cp -r "${{ env.DOWNLOAD_PATH }}/artifacts/model/"* "${{ env.UPLOAD_ARTIFACT_DIR }}/" || true
+          fi
+          # Copy possible named-outputs model metrics
+          if [ -f "${{ env.DOWNLOAD_PATH }}/named-outputs/model/metrics.json" ]; then
+            cp "${{ env.DOWNLOAD_PATH }}/named-outputs/model/metrics.json" "${{ env.UPLOAD_ARTIFACT_DIR }}/" || true
+          fi
+
+          echo "Contents of uploadartifact:"
+          find "${{ env.UPLOAD_ARTIFACT_DIR }}" -maxdepth 2 -type f -printf '%p %s bytes\n' || true
+
+      - name: Install Python deps for registration
+        if: steps.get_best_id.outputs.best_trial_id != ''
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade azure-ai-ml azure-identity
+
+      - name: Register best model (Azure ML)
+        if: steps.get_best_id.outputs.best_trial_id != ''
+        run: |
+          echo "Registering model from: ${{ env.UPLOAD_ARTIFACT_DIR }}"
+          python src/register_local.py \
+            --model_dir "${{ env.UPLOAD_ARTIFACT_DIR }}" \
+            --model_name "${{ env.MODEL_NAME }}" \
+            --primary_metric "${{ env.PRIMARY_METRIC }}" \
+            --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" \
+            --resource_group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --workspace "${{ env.AZURE_WORKSPACE }}" || (echo "Registration failed" && exit 1)
