@@ -1,0 +1,46 @@
+$schema: https://azuremlschemas.azureedge.net/latest/sweepJob.schema.json
+type: sweep
+name: diabetes_hyper_tuning
+experiment_name: diabetes_tuning_experiment
+description: Hyperparameter tuning for logistic regression reg_rate parameter
+
+# Replace with your Azure ML compute name
+compute: azureml:cpu-cluster
+
+objective:
+  goal: maximize
+  primary_metric: f1
+
+sampling_algorithm: random
+
+search_space:
+  reg_rate:
+    type: uniform
+    min_value: 0.001
+    max_value: 0.1
+  test_size:
+    type: choice
+    values: [0.2, 0.25, 0.3]
+
+trial:
+  command: >-
+    python train.py
+    --training_data ${{inputs.training_data}}
+    --reg_rate ${{search_space.reg_rate}}
+    --test_size ${{search_space.test_size}}
+    --output ${{outputs.model}}
+  code: ./src
+  environment: azureml:sklearn-env@latest
+  inputs:
+    training_data:
+      type: uri_folder
+      path: azureml:diabetes_data@latest
+  outputs:
+    model:
+      type: uri_folder
+      mode: upload
+
+limits:
+  max_total_trials: 10
+  max_concurrent_trials: 3
+  timeout: 3600
