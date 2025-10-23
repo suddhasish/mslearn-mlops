@@ -29,7 +29,7 @@ trial:
     --reg_rate ${{search_space.reg_rate}}
     --test_size ${{search_space.test_size}}
     --output ${{outputs.model}}
-  code: ./src
+  code: .
   environment: azureml:sklearn-env@latest
   inputs:
     training_data:
