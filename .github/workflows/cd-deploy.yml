@@ -1,0 +1,144 @@
+name: CI/CD - Deploy model to Azure ML (Staging -> Prod with approval)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_name:
+        description: 'Model name to deploy'
+        required: true
+        default: 'best-model'
+      model_version:
+        description: 'Model version or tag'
+        required: true
+        default: '1'
+      aml_workspace:
+        description: 'Azure ML workspace name'
+        required: true
+        default: ''
+      resource_group:
+        description: 'Azure resource group'
+        required: true
+        default: ''
+      subscription_id:
+        description: 'Azure subscription id'
+        required: true
+        default: ''
+  repository_dispatch:
+    types: [aml_model_registered]
+
+env:
+  AZURE_ML_ENDPOINT_NAME: my-ml-endpoint
+  STAGING_DEPLOYMENT_NAME: stg-deployment
+  PRODUCTION_DEPLOYMENT_NAME: prod-deployment
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    outputs:
+      endpoint_url: ${{ steps.get_endpoint.outputs.ENDPOINT_URL }}
+      endpoint_key: ${{ steps.get_endpoint.outputs.ENDPOINT_KEY }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Install Azure ML CLI extension
+      run: |
+        az config set extension.use_dynamic_install=yes_without_prompt
+        az extension add -n ml --yes || true
+
+    - name: Resolve inputs (supports workflow_dispatch and repository_dispatch)
+      id: resolve_inputs
+      run: |
+        echo "model_name=${{ github.event.inputs.model_name || github.event.client_payload.model_name }}" >> $GITHUB_OUTPUT
+        echo "model_version=${{ github.event.inputs.model_version || github.event.client_payload.model_version }}" >> $GITHUB_OUTPUT
+        echo "aml_workspace=${{ github.event.inputs.aml_workspace || github.event.client_payload.aml_workspace }}" >> $GITHUB_OUTPUT
+        echo "resource_group=${{ github.event.inputs.resource_group || github.event.client_payload.resource_group }}" >> $GITHUB_OUTPUT
+        echo "subscription_id=${{ github.event.inputs.subscription_id || github.event.client_payload.subscription_id }}" >> $GITHUB_OUTPUT
+
+    - name: Create or update managed online endpoint (staging)
+      run: |
+        az ml online-endpoint create --name $AZURE_ML_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" || true
+
+    - name: Deploy model to staging
+      run: |
+        az ml online-deployment create \
+          --endpoint-name $AZURE_ML_ENDPOINT_NAME \
+          --name $STAGING_DEPLOYMENT_NAME \
+          --model "${{ steps.resolve_inputs.outputs.model_name }}:${{ steps.resolve_inputs.outputs.model_version }}" \
+          --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" \
+          --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" \
+          --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" \
+          --all-traffic \
+          --instance-type Standard_DS3_v2 \
+          --instance-count 1
+
+    - name: Wait for endpoint to become healthy
+      run: |
+        echo "Waiting up to 5 minutes for endpoint to reach Succeeded..."
+        for i in {1..30}; do
+          status=$(az ml online-endpoint show --name $AZURE_ML_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query provisioning_state -o tsv)
+          echo "Provisioning state: $status"
+          if [ "$status" = "Succeeded" ] || [ "$status" = "Succeeded" ]; then
+            break
+          fi
+          sleep 10
+        done
+
+    - name: Get staging scoring URI and key
+      id: get_endpoint
+      run: |
+        ENDPOINT_URL=$(az ml online-endpoint show --name $AZURE_ML_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query scoring_uri -o tsv)
+        KEY=$(az ml online-endpoint get-credentials --name $AZURE_ML_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query primaryKey -o tsv)
+        echo "ENDPOINT_URL=$ENDPOINT_URL" >> $GITHUB_OUTPUT
+        echo "ENDPOINT_KEY=$KEY" >> $GITHUB_OUTPUT
+
+    - name: Test staging endpoint
+      env:
+        ENDPOINT_URL: ${{ steps.get_endpoint.outputs.ENDPOINT_URL }}
+        ENDPOINT_KEY: ${{ steps.get_endpoint.outputs.ENDPOINT_KEY }}
+      run: |
+        python3 scripts/test_endpoint.py --url "$ENDPOINT_URL" --key "$ENDPOINT_KEY"
+
+    - name: Post staging endpoint comment (optional)
+      if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' }}
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const url = "${{ steps.get_endpoint.outputs.ENDPOINT_URL }}";
+          console.log("Staging endpoint:", url);
+
+  promote-to-prod:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Deploy to production endpoint
+      run: |
+        az ml online-deployment create \
+          --endpoint-name $AZURE_ML_ENDPOINT_NAME \
+          --name $PRODUCTION_DEPLOYMENT_NAME \
+          --model "${{ github.event.inputs.model_name || github.event.client_payload.model_name }}:${{ github.event.inputs.model_version || github.event.client_payload.model_version }}" \
+          --workspace-name "${{ github.event.inputs.aml_workspace || github.event.client_payload.aml_workspace }}" \
+          --resource-group "${{ github.event.inputs.resource_group || github.event.client_payload.resource_group }}" \
+          --subscription "${{ github.event.inputs.subscription_id || github.event.client_payload.subscription_id }}" \
+          --all-traffic \
+          --instance-type Standard_DS3_v2 \
+          --instance-count 2
+
+    - name: Show production endpoint URL
+      run: |
+        az ml online-endpoint show --name $AZURE_ML_ENDPOINT_NAME --query scoring_uri -o tsv
