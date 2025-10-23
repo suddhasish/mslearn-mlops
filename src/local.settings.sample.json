@@ -1,0 +1,15 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "GITHUB_TOKEN": "<your-github-pat-with-repo-and-workflow-scope>",
+    "REPO_OWNER": "suddhasish",
+    "REPO_NAME": "mslearn-mlops",
+    "WORKFLOW_FILE": ".github/workflows/cd-deploy.yml",
+    "REF": "main",
+    "AML_WORKSPACE": "<your-aml-workspace>",
+    "RESOURCE_GROUP": "<your-resource-group>",
+    "SUBSCRIPTION_ID": "<your-subscription-id>"
+  }
+}
