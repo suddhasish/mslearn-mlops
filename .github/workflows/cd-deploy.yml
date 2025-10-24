@@ -1,4 +1,4 @@
-name: CI/CD - Deploy model to Azure ML (Staging -> Prod with approval)
+name: CI/CD - Blue/Green Deploy to Azure ML (Staging -> Prod with approval)
 
 on:
   workflow_dispatch:
@@ -27,16 +27,23 @@ on:
     types: [aml_model_registered]
 
 env:
-  AZURE_ML_ENDPOINT_NAME: my-ml-endpoint
+  # Separate endpoints for staging and production (we no longer reuse the same endpoint for both)
+  AZURE_ML_STAGING_ENDPOINT_NAME: my-ml-endpoint-stg
+  AZURE_ML_PRODUCTION_ENDPOINT_NAME: my-ml-endpoint-prod
+
+  # Deployment names used for blue/green in production
   STAGING_DEPLOYMENT_NAME: stg-deployment
-  PRODUCTION_DEPLOYMENT_NAME: prod-deployment
+  PROD_BLUE_DEPLOYMENT_NAME: prod-blue-deployment
+  PROD_GREEN_DEPLOYMENT_NAME: prod-green-deployment
 
 jobs:
   deploy-staging:
     runs-on: ubuntu-latest
     outputs:
-      endpoint_url: ${{ steps.get_endpoint.outputs.ENDPOINT_URL }}
-      endpoint_key: ${{ steps.get_endpoint.outputs.ENDPOINT_KEY }}
+      model_name: ${{ steps.resolve_inputs.outputs.model_name }}
+      model_version: ${{ steps.resolve_inputs.outputs.model_version }}
+      staging_endpoint_url: ${{ steps.get_endpoint.outputs.ENDPOINT_URL }}
+      staging_endpoint_key: ${{ steps.get_endpoint.outputs.ENDPOINT_KEY }}
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -62,12 +69,17 @@ jobs:
 
     - name: Create or update managed online endpoint (staging)
       run: |
-        az ml online-endpoint create --name $AZURE_ML_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" || true
+        az ml online-endpoint create \
+          --name $AZURE_ML_STAGING_ENDPOINT_NAME \
+          --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" \
+          --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" \
+          --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" \
+          --auth-mode key || true
 
     - name: Deploy model to staging
       run: |
         az ml online-deployment create \
-          --endpoint-name $AZURE_ML_ENDPOINT_NAME \
+          --endpoint-name $AZURE_ML_STAGING_ENDPOINT_NAME \
           --name $STAGING_DEPLOYMENT_NAME \
           --model "${{ steps.resolve_inputs.outputs.model_name }}:${{ steps.resolve_inputs.outputs.model_version }}" \
           --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" \
@@ -75,13 +87,15 @@ jobs:
           --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" \
           --all-traffic \
           --instance-type Standard_DS3_v2 \
-          --instance-count 1
+          --instance-count 1 \
+          --overwrite
 
-    - name: Wait for endpoint to become healthy
+    - name: Wait for staging endpoint to become healthy
       run: |
-        echo "Waiting up to 5 minutes for endpoint to reach Succeeded..."
+        set -e
+        echo "Waiting up to 5 minutes for staging endpoint to reach Succeeded..."
         for i in {1..30}; do
-          status=$(az ml online-endpoint show --name $AZURE_ML_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query provisioning_state -o tsv)
+          status=$(az ml online-endpoint show --name $AZURE_ML_STAGING_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query provisioning_state -o tsv)
           echo "Provisioning state: $status"
           if [ "$status" = "Succeeded" ] || [ "$status" = "Succeeded" ]; then
             break
@@ -92,8 +106,8 @@ jobs:
     - name: Get staging scoring URI and key
       id: get_endpoint
       run: |
-        ENDPOINT_URL=$(az ml online-endpoint show --name $AZURE_ML_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query scoring_uri -o tsv)
-        KEY=$(az ml online-endpoint get-credentials --name $AZURE_ML_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query primaryKey -o tsv)
+        ENDPOINT_URL=$(az ml online-endpoint show --name $AZURE_ML_STAGING_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query scoring_uri -o tsv)
+        KEY=$(az ml online-endpoint get-credentials --name $AZURE_ML_STAGING_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query primaryKey -o tsv)
         echo "ENDPOINT_URL=$ENDPOINT_URL" >> $GITHUB_OUTPUT
         echo "ENDPOINT_KEY=$KEY" >> $GITHUB_OUTPUT
 
@@ -113,10 +127,15 @@ jobs:
           const url = "${{ steps.get_endpoint.outputs.ENDPOINT_URL }}";
           console.log("Staging endpoint:", url);
 
-  promote-to-prod:
+  prepare-prod:
     needs: deploy-staging
     runs-on: ubuntu-latest
-    environment: production
+    outputs:
+      prod_endpoint_name: ${{ env.AZURE_ML_PRODUCTION_ENDPOINT_NAME }}
+      prod_blue: ${{ env.PROD_BLUE_DEPLOYMENT_NAME }}
+      prod_green: ${{ env.PROD_GREEN_DEPLOYMENT_NAME }}
+      model_name: ${{ needs.deploy-staging.outputs.model_name }}
+      model_version: ${{ needs.deploy-staging.outputs.model_version }}
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -126,19 +145,188 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Deploy to production endpoint
+    - name: Install Azure ML CLI extension
+      run: |
+        az config set extension.use_dynamic_install=yes_without_prompt
+        az extension add -n ml --yes || true
+
+    - name: Resolve inputs again (ensure job has them)
+      id: resolve_inputs
+      run: |
+        echo "model_name=${{ needs.deploy-staging.outputs.model_name }}" >> $GITHUB_OUTPUT
+        echo "model_version=${{ needs.deploy-staging.outputs.model_version }}" >> $GITHUB_OUTPUT
+        # also expose workspace/resource/sub if available from trigger
+        echo "aml_workspace=${{ github.event.inputs.aml_workspace || github.event.client_payload.aml_workspace }}" >> $GITHUB_OUTPUT
+        echo "resource_group=${{ github.event.inputs.resource_group || github.event.client_payload.resource_group }}" >> $GITHUB_OUTPUT
+        echo "subscription_id=${{ github.event.inputs.subscription_id || github.event.client_payload.subscription_id }}" >> $GITHUB_OUTPUT
+
+    - name: Create or update managed online endpoint (production)
+      run: |
+        az ml online-endpoint create \
+          --name $AZURE_ML_PRODUCTION_ENDPOINT_NAME \
+          --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" \
+          --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" \
+          --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" \
+          --auth-mode key || true
+
+    - name: Ensure a blue deployment exists (do not change traffic)
+      run: |
+        # If there is no existing deployment (first-time prod), create the blue deployment from the current model.
+        set -e
+        existing=$(az ml online-deployment list --endpoint-name $AZURE_ML_PRODUCTION_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query "length([])" -o tsv)
+        if [ "$existing" = "0" ]; then
+          echo "No existing prod deployments found. Creating BLUE deployment using model ${{ steps.resolve_inputs.outputs.model_name }}:${{ steps.resolve_inputs.outputs.model_version }} and routing 100% to it."
+          az ml online-deployment create \
+            --endpoint-name $AZURE_ML_PRODUCTION_ENDPOINT_NAME \
+            --name $PROD_BLUE_DEPLOYMENT_NAME \
+            --model "${{ steps.resolve_inputs.outputs.model_name }}:${{ steps.resolve_inputs.outputs.model_version }}" \
+            --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" \
+            --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" \
+            --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" \
+            --instance-type Standard_DS3_v2 \
+            --instance-count 2 \
+            --all-traffic \
+            --overwrite
+        else
+          echo "Existing deployments present. Skipping creating blue deployment to avoid interrupting traffic."
+        fi
+
+    - name: Create GREEN deployment (no traffic change)
       run: |
         az ml online-deployment create \
-          --endpoint-name $AZURE_ML_ENDPOINT_NAME \
-          --name $PRODUCTION_DEPLOYMENT_NAME \
-          --model "${{ github.event.inputs.model_name || github.event.client_payload.model_name }}:${{ github.event.inputs.model_version || github.event.client_payload.model_version }}" \
-          --workspace-name "${{ github.event.inputs.aml_workspace || github.event.client_payload.aml_workspace }}" \
-          --resource-group "${{ github.event.inputs.resource_group || github.event.client_payload.resource_group }}" \
-          --subscription "${{ github.event.inputs.subscription_id || github.event.client_payload.subscription_id }}" \
-          --all-traffic \
+          --endpoint-name $AZURE_ML_PRODUCTION_ENDPOINT_NAME \
+          --name $PROD_GREEN_DEPLOYMENT_NAME \
+          --model "${{ steps.resolve_inputs.outputs.model_name }}:${{ steps.resolve_inputs.outputs.model_version }}" \
+          --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" \
+          --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" \
+          --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" \
           --instance-type Standard_DS3_v2 \
-          --instance-count 2
+          --instance-count 1 \
+          --overwrite || true
 
-    - name: Show production endpoint URL
+    - name: Wait for GREEN deployment provisioning
       run: |
-        az ml online-endpoint show --name $AZURE_ML_ENDPOINT_NAME --query scoring_uri -o tsv
+        set -e
+        echo "Waiting up to 5 minutes for green deployment to reach Succeeded..."
+        for i in {1..30}; do
+          status=$(az ml online-deployment show --endpoint-name $AZURE_ML_PRODUCTION_ENDPOINT_NAME --name $PROD_GREEN_DEPLOYMENT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query provisioning_state -o tsv)
+          echo "Green deployment provisioning state: $status"
+          if [ "$status" = "Succeeded" ]; then
+            break
+          fi
+          sleep 10
+        done
+
+    - name: Get GREEN deployment scoring URI and key (to test in isolation)
+      id: get_green_endpoint
+      run: |
+        DEPLOY_URL=$(az ml online-deployment show --endpoint-name $AZURE_ML_PRODUCTION_ENDPOINT_NAME --name $PROD_GREEN_DEPLOYMENT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query scoring_uri -o tsv)
+        KEY=$(az ml online-endpoint get-credentials --name $AZURE_ML_PRODUCTION_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query primaryKey -o tsv)
+        echo "DEPLOYMENT_URL=$DEPLOY_URL" >> $GITHUB_OUTPUT
+        echo "ENDPOINT_KEY=$KEY" >> $GITHUB_OUTPUT
+
+    - name: Test GREEN deployment in isolation
+      env:
+        DEPLOYMENT_URL: ${{ steps.get_green_endpoint.outputs.DEPLOYMENT_URL }}
+        ENDPOINT_KEY: ${{ steps.get_green_endpoint.outputs.ENDPOINT_KEY }}
+      run: |
+        echo "Testing green deployment in isolation..."
+        python3 scripts/test_endpoint.py --url "$DEPLOYMENT_URL" --key "$ENDPOINT_KEY"
+
+    - name: Show current prod endpoint traffic (info)
+      run: |
+        az ml online-endpoint show --name $AZURE_ML_PRODUCTION_ENDPOINT_NAME --workspace-name "${{ steps.resolve_inputs.outputs.aml_workspace }}" --resource-group "${{ steps.resolve_inputs.outputs.resource_group }}" --subscription "${{ steps.resolve_inputs.outputs.subscription_id }}" --query traffic
+
+  await-approval:
+    needs: prepare-prod
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Approval message / info
+      run: |
+        echo "Staging tests passed and GREEN deployment is ready for isolated testing."
+        echo "This job is attached to the 'production' environment and will pause here until a reviewer approves the deployment to start blue->green rollout."
+        echo "Production endpoint: $AZURE_ML_PRODUCTION_ENDPOINT_NAME"
+        echo "Blue deployment: $PROD_BLUE_DEPLOYMENT_NAME"
+        echo "Green deployment: $PROD_GREEN_DEPLOYMENT_NAME"
+
+  rollout:
+    needs: await-approval
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Install Azure ML CLI extension
+      run: |
+        az config set extension.use_dynamic_install=yes_without_prompt
+        az extension add -n ml --yes || true
+
+    - name: Gradual traffic shift (10 -> 50 -> 100) with smoke tests and rollback on failure
+      env:
+        ENDPOINT_NAME: ${{ env.AZURE_ML_PRODUCTION_ENDPOINT_NAME }}
+        BLUE: ${{ env.PROD_BLUE_DEPLOYMENT_NAME }}
+        GREEN: ${{ env.PROD_GREEN_DEPLOYMENT_NAME }}
+        WORKSPACE: ${{ github.event.inputs.aml_workspace || github.event.client_payload.aml_workspace }}
+        RESOURCE_GROUP: ${{ github.event.inputs.resource_group || github.event.client_payload.resource_group }}
+        SUBSCRIPTION: ${{ github.event.inputs.subscription_id || github.event.client_payload.subscription_id }}
+      run: |
+        set -euo pipefail
+
+        # Helper to run smoke test against endpoint (normal endpoint URI + key)
+        smoke_test() {
+          ENDPOINT_URL=$(az ml online-endpoint show --name "$ENDPOINT_NAME" --workspace-name "$WORKSPACE" --resource-group "$RESOURCE_GROUP" --subscription "$SUBSCRIPTION" --query scoring_uri -o tsv)
+          KEY=$(az ml online-endpoint get-credentials --name "$ENDPOINT_NAME" --workspace-name "$WORKSPACE" --resource-group "$RESOURCE_GROUP" --subscription "$SUBSCRIPTION" --query primaryKey -o tsv)
+          echo "Running smoke test against $ENDPOINT_NAME (URI: $ENDPOINT_URL)..."
+          python3 scripts/test_endpoint.py --url "$ENDPOINT_URL" --key "$KEY"
+        }
+
+        rollback_to_blue() {
+          echo "Rolling back: routing 100% to BLUE ($BLUE)"
+          TRAFFIC_JSON="{\"$BLUE\":100}"
+          az ml online-endpoint update --name "$ENDPOINT_NAME" --workspace-name "$WORKSPACE" --resource-group "$RESOURCE_GROUP" --subscription "$SUBSCRIPTION" --traffic "$TRAFFIC_JSON"
+        }
+
+        for p in 10 50 100; do
+          blue_pct=$((100 - p))
+          green_pct=$p
+          echo "Shifting traffic: BLUE=$blue_pct%, GREEN=$green_pct%"
+
+          # Build traffic JSON dynamically
+          if [ "$blue_pct" -eq 0 ]; then
+            TRAFFIC_JSON="{\"$GREEN\":$green_pct}"
+          else
+            TRAFFIC_JSON="{\"$BLUE\":$blue_pct,\"$GREEN\":$green_pct}"
+          fi
+
+          echo "Applying traffic mapping: $TRAFFIC_JSON"
+          az ml online-endpoint update --name "$ENDPOINT_NAME" --workspace-name "$WORKSPACE" --resource-group "$RESOURCE_GROUP" --subscription "$SUBSCRIPTION" --traffic "$TRAFFIC_JSON"
+
+          # Wait briefly to allow traffic to route and run smoke test
+          echo "Waiting 15s for traffic propagation..."
+          sleep 15
+
+          # Run smoke test; if it fails, rollback and exit non-zero
+          if ! smoke_test; then
+            echo "Smoke test failed after shifting to $p%. Rolling back."
+            rollback_to_blue
+            exit 1
+          else
+            echo "Smoke test passed at $p%."
+          fi
+        done
+
+        echo "Traffic successfully shifted to GREEN 100%."
+
+    - name: Finalize - optional cleanup
+      run: |
+        echo "Optionally, scale down or remove BLUE deployment or keep it for quick rollback (left as manual choice)."
+        az ml online-deployment show --endpoint-name "${{ env.AZURE_ML_PRODUCTION_ENDPOINT_NAME }}" --name "${{ env.PROD_BLUE_DEPLOYMENT_NAME }}" --query provisioning_state || true
