@@ -5,7 +5,7 @@ experiment_name: diabetes_tuning_experiment
 description: Hyperparameter tuning for logistic regression reg_rate parameter
 
 # Replace with your Azure ML compute name
-compute: azureml:cpu-cluster
+compute: amlcluster
 
 objective:
   goal: maximize
@@ -30,10 +30,9 @@ trial:
     --test_size ${{search_space.test_size}}
     --output ${{outputs.model}}
   code: .
-  environment: azureml:sklearn-env@latest
+  environment: azureml:AzureML-sklearn-0.24-ubuntu18.04-py37-cpu@latest
   inputs:
     training_data:
-      type: uri_folder
       path: azureml:diabetes_data@latest
   outputs:
     model:
