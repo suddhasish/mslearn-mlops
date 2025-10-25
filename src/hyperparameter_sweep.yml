@@ -4,7 +4,7 @@ name: diabetes_hyper_tuning
 experiment_name: diabetes_tuning_experiment
 description: Hyperparameter tuning for logistic regression reg_rate parameter
 
-# Replace with your Azure ML compute name
+# Replace with your Azure ML compute name (use azureml:<compute-name>)
 compute: amlcluster
 
 objective:
@@ -13,11 +13,21 @@ objective:
 
 sampling_algorithm: random
 
+# top-level inputs/outputs (moved from trial)
+inputs:
+  training_data:
+    path: azureml:diabetes_data@latest
+
+outputs:
+  model:
+    type: uri_folder
+    mode: upload
+
 search_space:
   reg_rate:
     type: uniform
-    min: 0.001
-    max: 0.1
+    min_value: 0.001
+    max_value: 0.1
   test_size:
     type: choice
     values: [0.2, 0.25, 0.3]
@@ -25,19 +35,12 @@ search_space:
 trial:
   command: >-
     python train.py
-    --training_data ${{inputs.training_data}}
-    --reg_rate ${{search_space.reg_rate}}
-    --test_size ${{search_space.test_size}}
-    --output ${{outputs.model}}
+    --training_data ${{ inputs.training_data }}
+    --reg_rate ${{ search_space.reg_rate }}
+    --test_size ${{ search_space.test_size }}
+    --output ${{ outputs.model }}
   code: .
   environment: azureml:AzureML-sklearn-0.24-ubuntu18.04-py37-cpu@latest
-  inputs:
-    training_data:
-      path: azureml:diabetes_data@latest
-  outputs:
-    model:
-      type: uri_folder
-      mode: upload
 
 limits:
   max_total_trials: 10
