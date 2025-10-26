@@ -2,7 +2,7 @@ name: Scheduled Hyperparameter Tuning (Azure ML)
 
 # Runs on schedule and can be triggered manually
 on:
-  schedule:
+  #schedule:
     # run once daily at 02:30 UTC by default (adjust cron as needed)
     #- cron: '30 20 * * *'
   workflow_dispatch: {}
