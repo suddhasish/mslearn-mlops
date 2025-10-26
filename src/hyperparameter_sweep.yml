@@ -16,7 +16,7 @@ sampling_algorithm: random
 # top-level inputs/outputs (moved from trial)
 inputs:
   training_data:
-    path: azureml:diabetes_data@latest
+    path: azureml:diabetes-dev-folder@latest
 
 outputs:
   model:
