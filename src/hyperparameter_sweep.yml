@@ -39,7 +39,7 @@ trial:
     --reg_rate ${{ search_space.reg_rate }}
     --test_size ${{ search_space.test_size }}
     --output ${{ outputs.model }}
-  code: .
+  code: model
   environment: azureml:AzureML-sklearn-0.24-ubuntu18.04-py37-cpu@latest
 
 limits:
