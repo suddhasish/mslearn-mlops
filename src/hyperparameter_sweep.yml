@@ -1,6 +1,5 @@
 $schema: https://azuremlschemas.azureedge.net/latest/sweepJob.schema.json
 type: sweep
-name: diabetes_hyper_tuning
 experiment_name: diabetes_tuning_experiment
 description: Hyperparameter tuning for logistic regression reg_rate parameter
 
