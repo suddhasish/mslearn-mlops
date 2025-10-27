@@ -128,7 +128,7 @@ jobs:
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --workspace-name "$AZURE_WORKSPACE" \
             --subscription "$AZURE_SUBSCRIPTION_ID" \
-            --query "properties.best_trial.id" -o tsv 2>/dev/null || true)
+            --query "properties.best_child_run_id" -o tsv 2>/dev/null || true)
 
           # fallback if the CLI returned empty - inspect whole job json and try alternate path
           if [ -z "$BEST_TRIAL_ID" ]; then
