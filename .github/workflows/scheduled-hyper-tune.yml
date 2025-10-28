@@ -157,7 +157,7 @@ jobs:
           echo "Downloading model output for best trial: $BEST_TRIAL"
           mkdir -p ${{ env.DOWNLOAD_PATH }}
           az ml job download \
-            --all
+            --all \
             --name "$BEST_TRIAL" \
             --output-name model \
             --download-path "${{ env.DOWNLOAD_PATH }}" \
