@@ -191,5 +191,5 @@ jobs:
             --model_name "${{ env.MODEL_NAME }}" \
             --primary_metric "${{ env.PRIMARY_METRIC }}" \
             --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" \
-            --resource_group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --workspace "${{ env.AZURE_WORKSPACE }}" || (echo "Registration failed" && exit 1)
+            --resource_group "${{ env.env.AZURE_ML_RESOURCE_GROUP }}" \
+            --workspace "${{ env.AZURE_ML_WORKSPACE_NAME }}" || (echo "Registration failed" && exit 1)
