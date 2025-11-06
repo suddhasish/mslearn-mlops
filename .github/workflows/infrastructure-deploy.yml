@@ -407,7 +407,7 @@ jobs:
           
           # Notifications
           notification_email       = "${{ secrets.NOTIFICATION_EMAIL }}"
-          enable_slack_notifications = ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+          enable_slack_notifications = ${SLACK_NOTIFY}
           slack_webhook_url        = "${{ secrets.SLACK_WEBHOOK_URL }}"
           EOF
 
@@ -418,6 +418,9 @@ jobs:
 
       - name: Terraform Plan
         id: plan
+        env:
+          SLACK_NOTIFY: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           cd ${{ env.WORKING_DIR }}
           terraform plan -out=tfplan-prod -no-color
@@ -440,6 +443,8 @@ jobs:
     environment:
       name: production
       url: https://portal.azure.com
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -500,7 +505,7 @@ jobs:
           path: ${{ env.WORKING_DIR }}/outputs-prod.json
 
       - name: Send Slack Notification
-        if: secrets.SLACK_WEBHOOK_URL != ''
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
         uses: slackapi/slack-github-action@v1
         with:
           payload: |
