@@ -407,8 +407,8 @@ jobs:
           
           # Notifications
           notification_email       = "${{ secrets.NOTIFICATION_EMAIL }}"
-          enable_slack_notifications = ${SLACK_NOTIFY}
-          slack_webhook_url        = "${{ secrets.SLACK_WEBHOOK_URL }}"
+          enable_slack_notifications = false
+          # slack_webhook_url        = "${{ secrets.SLACK_WEBHOOK_URL }}"
           EOF
 
       - name: Terraform Init
@@ -418,9 +418,9 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        env:
-          SLACK_NOTIFY: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # env:
+        #   SLACK_NOTIFY: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        #   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           cd ${{ env.WORKING_DIR }}
           terraform plan -out=tfplan-prod -no-color
@@ -443,8 +443,8 @@ jobs:
     environment:
       name: production
       url: https://portal.azure.com
-    env:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    # env:
+    #   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -504,39 +504,40 @@ jobs:
           name: terraform-outputs-prod
           path: ${{ env.WORKING_DIR }}/outputs-prod.json
 
-      - name: Send Slack Notification
-        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            {
-              "text": "🚀 Production Infrastructure Deployed",
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "🚀 Production Infrastructure Deployed"
-                  }
-                },
-                {
-                  "type": "section",
-                  "fields": [
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Environment:*\nProduction"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Deployed by:*\n${{ github.actor }}"
-                    }
-                  ]
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+      # Slack notification - Uncomment when SLACK_WEBHOOK_URL secret is configured
+      # - name: Send Slack Notification
+      #   if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+      #   uses: slackapi/slack-github-action@v1
+      #   with:
+      #     payload: |
+      #       {
+      #         "text": "🚀 Production Infrastructure Deployed",
+      #         "blocks": [
+      #           {
+      #             "type": "header",
+      #             "text": {
+      #               "type": "plain_text",
+      #               "text": "🚀 Production Infrastructure Deployed"
+      #             }
+      #           },
+      #           {
+      #             "type": "section",
+      #             "fields": [
+      #               {
+      #                 "type": "mrkdwn",
+      #                 "text": "*Environment:*\nProduction"
+      #               },
+      #               {
+      #                 "type": "mrkdwn",
+      #                 "text": "*Deployed by:*\n${{ github.actor }}"
+      #               }
+      #             ]
+      #           }
+      #         ]
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      #     SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
       - name: Create Deployment Summary
         run: |
