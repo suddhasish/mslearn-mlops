@@ -1,0 +1,150 @@
+# ============================================================================
+# Azure MLOps Infrastructure - FREE TIER Configuration
+# ============================================================================
+# 
+# This configuration is optimized for Azure free tier accounts.
+# Total Monthly Cost: ~$0 (stays within free tier limits)
+#
+# What you get:
+# ✅ Application Insights (5GB/month free)
+# ✅ Log Analytics (5GB/month free)
+# ✅ 5 Metric Alerts (10 rules free)
+# ✅ Email Notifications (1,000/month free)
+# ✅ Complete ML monitoring pipeline
+#
+# What's disabled:
+# ❌ Function App (adds cost)
+# ❌ Power BI Embedded (~$20/month)
+# ❌ SQL Database (~$36/month)
+# ❌ Stream Analytics (~$81/month)
+# ❌ AKS (expensive for free tier)
+#
+# ============================================================================
+
+# Required: Basic Configuration
+prefix      = "mlops"
+environment = "dev"
+location    = "eastus"  # Choose region closest to you
+
+# Required: Your email for alert notifications
+notification_email = "your-email@example.com"
+
+# ============================================================================
+# FREE TIER: Disable Expensive Features
+# ============================================================================
+
+# Disable DevOps integration (Function App, SQL, Power BI, Stream Analytics)
+enable_devops_integration = false
+
+# Disable Synapse Analytics (expensive)
+enable_synapse = false
+
+# Disable Cognitive Services (adds cost)
+enable_cognitive_services = false
+
+# Disable Data Factory (not needed for basic MLOps)
+enable_data_factory = false
+
+# Disable AKS (expensive - use Azure ML compute instead)
+enable_aks_deployment = false
+
+# ============================================================================
+# Monitoring Configuration (FREE TIER COMPATIBLE)
+# ============================================================================
+
+# Keep log retention low to stay within free tier limits
+log_retention_days = 30  # Max 31 days free
+
+# Enable container insights (included in free tier)
+enable_container_insights = true
+
+# Email notifications (1,000/month free)
+# enable_slack_notifications = false
+# slack_webhook_url = ""  # Optional: Add Slack webhook if needed
+
+# ============================================================================
+# Compute Configuration (MINIMAL COST)
+# ============================================================================
+
+# Use smaller compute for training (auto-scales to 0)
+training_compute_sku      = "STANDARD_DS2_V2"
+training_compute_min_nodes = 0  # Scales to 0 when idle
+training_compute_max_nodes = 2
+
+# Disable GPU compute (expensive)
+# gpu_compute_sku = null
+
+# ============================================================================
+# Storage Configuration (FREE TIER)
+# ============================================================================
+
+# Use Standard LRS (cheapest option)
+# Storage is included in ML Workspace free tier
+
+# ============================================================================
+# Networking (OPTIONAL - Disable for Free Tier)
+# ============================================================================
+
+# Disable private endpoints (add cost)
+enable_private_endpoints = false
+
+# Disable AKS private cluster (expensive)
+enable_aks_private_cluster = false
+
+# ============================================================================
+# RBAC Configuration
+# ============================================================================
+
+# Enable RBAC (no additional cost)
+enable_rbac = true
+
+# Add your AAD user/group object IDs for access
+# data_scientist_principal_ids = ["00000000-0000-0000-0000-000000000000"]
+# ml_engineer_principal_ids    = ["00000000-0000-0000-0000-000000000000"]
+
+# ============================================================================
+# Cost Management
+# ============================================================================
+
+# Set low budget alerts (free)
+monthly_budget_amount = 50  # Alert if spending exceeds $50/month
+
+# ============================================================================
+# Tags (NO COST)
+# ============================================================================
+
+tags = {
+  Environment = "Development"
+  CostCenter  = "MLOps"
+  Tier        = "Free"
+  ManagedBy   = "Terraform"
+}
+
+# ============================================================================
+# DEPLOYMENT INSTRUCTIONS
+# ============================================================================
+#
+# 1. Copy this file:
+#    cp terraform.tfvars.free-tier terraform.tfvars
+#
+# 2. Update required values:
+#    - notification_email (your email)
+#    - location (your preferred Azure region)
+#
+# 3. Deploy:
+#    terraform init
+#    terraform plan
+#    terraform apply
+#
+# 4. Verify:
+#    - Check Application Insights in Azure Portal
+#    - Submit a test training job
+#    - Verify email alerts work
+#
+# 5. Monitor costs:
+#    - Azure Portal → Cost Management → Cost Analysis
+#    - Should stay at $0 if within free tier limits
+#
+# ============================================================================
+# ESTIMATED MONTHLY COST: $0
+# ============================================================================

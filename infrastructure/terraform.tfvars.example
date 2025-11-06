@@ -1,0 +1,55 @@
+# Terraform Environment Configuration - Development
+# Copy this file to terraform.tfvars and customize for your environment
+
+environment                = "dev"
+project_name              = "mlops-demo"
+location                  = "East US 2"
+owner                     = "MLOps Team"
+cost_center               = "ML Engineering"
+business_unit             = "Data Science"
+
+# Network Configuration
+allowed_subnet_cidr       = "10.0.0.0/8"
+enable_private_endpoints  = false  # Set to true for production
+enable_purge_protection   = false  # Set to true for production
+
+# Compute Configuration
+ml_compute_name          = "cpu-cluster"
+aks_node_count          = 2
+aks_vm_size             = "Standard_D4s_v3"
+aks_enable_auto_scaling = true
+aks_min_nodes           = 1
+aks_max_nodes           = 5
+
+# Monitoring Configuration
+enable_container_insights = true
+log_retention_days       = 30
+
+# Security Configuration
+enable_network_policy    = true
+enable_rbac             = true
+enable_aad_integration  = true
+
+# Cost Management
+enable_cost_alerts      = true
+monthly_budget_amount   = 1000
+budget_alert_threshold  = 80
+
+# Azure DevOps Integration
+enable_devops_integration = true
+devops_organization_url   = "https://dev.azure.com/your-org"
+devops_project_name       = "MLOps Project"
+
+# Data Services
+enable_data_factory      = true
+enable_synapse          = false
+enable_cognitive_services = false
+
+# Backup and Recovery
+enable_backup           = true
+backup_retention_days   = 30
+
+# Notifications
+notification_email       = "your-email@example.com"
+enable_slack_notifications = false
+slack_webhook_url        = ""

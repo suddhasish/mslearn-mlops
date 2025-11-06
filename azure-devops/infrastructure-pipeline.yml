@@ -1,0 +1,358 @@
+# Azure DevOps Pipeline - Infrastructure Deployment
+# Deploys complete MLOps infrastructure using Terraform
+
+name: '$(Date:yyyyMMdd)$(Rev:.r)-Infrastructure'
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - infrastructure/*
+      - azure-devops/infrastructure-pipeline.yml
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - infrastructure/*
+
+variables:
+  - group: mlops-infrastructure-vars
+  - name: terraformVersion
+    value: '1.6.0'
+  - name: workingDirectory
+    value: '$(System.DefaultWorkingDirectory)/infrastructure'
+
+stages:
+  - stage: Validate
+    displayName: 'Validate Infrastructure'
+    jobs:
+      - job: TerraformValidate
+        displayName: 'Terraform Validation'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+            
+          - task: TerraformInstaller@0
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: $(terraformVersion)
+          
+          - task: AzureCLI@2
+            displayName: 'Azure Login'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Logged in to Azure"
+                az account show
+          
+          - script: |
+              cd $(workingDirectory)
+              terraform init -backend=false
+              terraform validate
+              terraform fmt -check -recursive
+            displayName: 'Terraform Init and Validate'
+            
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Terraform Files'
+            inputs:
+              targetPath: '$(workingDirectory)'
+              artifact: 'terraform-configs'
+
+  - stage: Plan_Dev
+    displayName: 'Plan - Development'
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: TerraformPlan
+        displayName: 'Terraform Plan'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+          
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Terraform Configs'
+            inputs:
+              artifactName: 'terraform-configs'
+              targetPath: '$(workingDirectory)'
+          
+          - task: TerraformInstaller@0
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: $(terraformVersion)
+          
+          - task: AzureCLI@2
+            displayName: 'Terraform Plan for Dev'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              addSpnToEnvironment: true
+              inlineScript: |
+                cd $(workingDirectory)
+                
+                # Initialize Terraform with Azure backend
+                terraform init \
+                  -backend-config="resource_group_name=$(tfStateResourceGroup)" \
+                  -backend-config="storage_account_name=$(tfStateStorageAccount)" \
+                  -backend-config="container_name=$(tfStateContainer)" \
+                  -backend-config="key=dev.tfstate"
+                
+                # Create plan
+                terraform plan \
+                  -var="environment=dev" \
+                  -var="project_name=$(projectName)" \
+                  -var="location=$(azureLocation)" \
+                  -var="notification_email=$(notificationEmail)" \
+                  -out=tfplan-dev
+                
+                # Show plan summary
+                terraform show -json tfplan-dev > tfplan-dev.json
+          
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Dev Plan'
+            inputs:
+              targetPath: '$(workingDirectory)/tfplan-dev'
+              artifact: 'tfplan-dev'
+          
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Dev Plan JSON'
+            inputs:
+              targetPath: '$(workingDirectory)/tfplan-dev.json'
+              artifact: 'tfplan-dev-json'
+
+  - stage: Deploy_Dev
+    displayName: 'Deploy - Development'
+    dependsOn: Plan_Dev
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    jobs:
+      - deployment: DeployInfrastructure
+        displayName: 'Deploy Infrastructure to Dev'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'mlops-dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download Terraform Configs'
+                  inputs:
+                    artifactName: 'terraform-configs'
+                    targetPath: '$(workingDirectory)'
+                
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download Dev Plan'
+                  inputs:
+                    artifactName: 'tfplan-dev'
+                    targetPath: '$(workingDirectory)'
+                
+                - task: TerraformInstaller@0
+                  displayName: 'Install Terraform'
+                  inputs:
+                    terraformVersion: $(terraformVersion)
+                
+                - task: AzureCLI@2
+                  displayName: 'Terraform Apply for Dev'
+                  inputs:
+                    azureSubscription: '$(azureServiceConnection)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      cd $(workingDirectory)
+                      
+                      # Initialize Terraform
+                      terraform init \
+                        -backend-config="resource_group_name=$(tfStateResourceGroup)" \
+                        -backend-config="storage_account_name=$(tfStateStorageAccount)" \
+                        -backend-config="container_name=$(tfStateContainer)" \
+                        -backend-config="key=dev.tfstate"
+                      
+                      # Apply the plan
+                      terraform apply -auto-approve tfplan-dev
+                      
+                      # Output the results
+                      terraform output -json > outputs-dev.json
+                
+                - task: PublishPipelineArtifact@1
+                  displayName: 'Publish Dev Outputs'
+                  inputs:
+                    targetPath: '$(workingDirectory)/outputs-dev.json'
+                    artifact: 'terraform-outputs-dev'
+                
+                - task: AzureCLI@2
+                  displayName: 'Configure ML Workspace'
+                  inputs:
+                    azureSubscription: '$(azureServiceConnection)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      # Install Azure ML CLI extension
+                      az extension add -n ml --upgrade -y
+                      
+                      # Get workspace details from Terraform outputs
+                      WORKSPACE_NAME=$(jq -r '.ml_workspace_name.value' $(workingDirectory)/outputs-dev.json)
+                      RESOURCE_GROUP=$(jq -r '.resource_group_name.value' $(workingDirectory)/outputs-dev.json)
+                      
+                      echo "ML Workspace: $WORKSPACE_NAME"
+                      echo "Resource Group: $RESOURCE_GROUP"
+                      
+                      # Set workspace as default
+                      az configure --defaults workspace=$WORKSPACE_NAME group=$RESOURCE_GROUP
+
+  - stage: Plan_Prod
+    displayName: 'Plan - Production'
+    dependsOn: Validate
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: TerraformPlan
+        displayName: 'Terraform Plan'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+          
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Terraform Configs'
+            inputs:
+              artifactName: 'terraform-configs'
+              targetPath: '$(workingDirectory)'
+          
+          - task: TerraformInstaller@0
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: $(terraformVersion)
+          
+          - task: AzureCLI@2
+            displayName: 'Terraform Plan for Prod'
+            inputs:
+              azureSubscription: '$(azureServiceConnectionProd)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              addSpnToEnvironment: true
+              inlineScript: |
+                cd $(workingDirectory)
+                
+                # Initialize Terraform with Azure backend
+                terraform init \
+                  -backend-config="resource_group_name=$(tfStateResourceGroupProd)" \
+                  -backend-config="storage_account_name=$(tfStateStorageAccountProd)" \
+                  -backend-config="container_name=$(tfStateContainer)" \
+                  -backend-config="key=prod.tfstate"
+                
+                # Create plan
+                terraform plan \
+                  -var="environment=prod" \
+                  -var="project_name=$(projectName)" \
+                  -var="location=$(azureLocation)" \
+                  -var="enable_private_endpoints=true" \
+                  -var="enable_purge_protection=true" \
+                  -var="notification_email=$(notificationEmail)" \
+                  -out=tfplan-prod
+                
+                # Show plan summary
+                terraform show -json tfplan-prod > tfplan-prod.json
+          
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Prod Plan'
+            inputs:
+              targetPath: '$(workingDirectory)/tfplan-prod'
+              artifact: 'tfplan-prod'
+          
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Prod Plan JSON'
+            inputs:
+              targetPath: '$(workingDirectory)/tfplan-prod.json'
+              artifact: 'tfplan-prod-json'
+
+  - stage: Deploy_Prod
+    displayName: 'Deploy - Production'
+    dependsOn: Plan_Prod
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployInfrastructure
+        displayName: 'Deploy Infrastructure to Prod'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'mlops-prod'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download Terraform Configs'
+                  inputs:
+                    artifactName: 'terraform-configs'
+                    targetPath: '$(workingDirectory)'
+                
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download Prod Plan'
+                  inputs:
+                    artifactName: 'tfplan-prod'
+                    targetPath: '$(workingDirectory)'
+                
+                - task: TerraformInstaller@0
+                  displayName: 'Install Terraform'
+                  inputs:
+                    terraformVersion: $(terraformVersion)
+                
+                - task: AzureCLI@2
+                  displayName: 'Terraform Apply for Prod'
+                  inputs:
+                    azureSubscription: '$(azureServiceConnectionProd)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      cd $(workingDirectory)
+                      
+                      # Initialize Terraform
+                      terraform init \
+                        -backend-config="resource_group_name=$(tfStateResourceGroupProd)" \
+                        -backend-config="storage_account_name=$(tfStateStorageAccountProd)" \
+                        -backend-config="container_name=$(tfStateContainer)" \
+                        -backend-config="key=prod.tfstate"
+                      
+                      # Apply the plan
+                      terraform apply -auto-approve tfplan-prod
+                      
+                      # Output the results
+                      terraform output -json > outputs-prod.json
+                
+                - task: PublishPipelineArtifact@1
+                  displayName: 'Publish Prod Outputs'
+                  inputs:
+                    targetPath: '$(workingDirectory)/outputs-prod.json'
+                    artifact: 'terraform-outputs-prod'
+                
+                - task: AzureCLI@2
+                  displayName: 'Configure ML Workspace'
+                  inputs:
+                    azureSubscription: '$(azureServiceConnectionProd)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      # Install Azure ML CLI extension
+                      az extension add -n ml --upgrade -y
+                      
+                      # Get workspace details from Terraform outputs
+                      WORKSPACE_NAME=$(jq -r '.ml_workspace_name.value' $(workingDirectory)/outputs-prod.json)
+                      RESOURCE_GROUP=$(jq -r '.resource_group_name.value' $(workingDirectory)/outputs-prod.json)
+                      
+                      echo "ML Workspace: $WORKSPACE_NAME"
+                      echo "Resource Group: $RESOURCE_GROUP"
