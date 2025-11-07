@@ -115,10 +115,15 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR }}
           
+          LOCATION="${{ secrets.AZURE_LOCATION }}"
+          if [ -z "$LOCATION" ]; then
+            LOCATION="eastus"
+          fi
+          
           cat > terraform.tfvars << EOF
           environment                = "dev"
           project_name              = "${{ secrets.PROJECT_NAME }}"
-          location                  = "${{ secrets.AZURE_LOCATION }}"
+          location                  = "$LOCATION"
           owner                     = "MLOps Team"
           cost_center               = "ML Engineering"
           business_unit             = "Data Science"
@@ -356,10 +361,15 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR }}
           
+          LOCATION="${{ secrets.AZURE_LOCATION }}"
+          if [ -z "$LOCATION" ]; then
+            LOCATION="eastus"
+          fi
+          
           cat > terraform.tfvars << EOF
           environment                = "prod"
           project_name              = "${{ secrets.PROJECT_NAME }}"
-          location                  = "${{ secrets.AZURE_LOCATION }}"
+          location                  = "$LOCATION"
           owner                     = "MLOps Team"
           cost_center               = "ML Engineering"
           business_unit             = "Data Science"
