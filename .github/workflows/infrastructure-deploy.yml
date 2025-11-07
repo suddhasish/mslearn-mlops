@@ -1,0 +1,554 @@
+# GitHub Actions - Infrastructure Deployment
+# Deploys complete MLOps infrastructure using Terraform
+
+name: Infrastructure Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - deployment-pipeline
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-deploy.yml'
+  pull_request:
+    branches:
+      - main
+      - deployment-pipeline
+    paths:
+      - 'infrastructure/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      destroy:
+        description: 'Destroy infrastructure'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  TERRAFORM_VERSION: '1.6.0'
+  WORKING_DIR: './infrastructure'
+
+jobs:
+  terraform-validate:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format Check
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init (no backend)
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform validate
+
+      - name: Upload Terraform configs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-configs
+          path: ${{ env.WORKING_DIR }}
+
+  terraform-plan-dev:
+    name: Plan - Development
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev') || (github.event_name == 'push' && github.ref == 'refs/heads/deployment-pipeline')
+    environment: 
+      name: dev-plan
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
+
+      - name: Verify Terraform Backend
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          echo "Using backend configuration from backend.tf"
+          cat backend.tf
+
+      - name: Create terraform.tfvars
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          
+          cat > terraform.tfvars << EOF
+          environment                = "dev"
+          project_name              = "${{ secrets.PROJECT_NAME }}"
+          location                  = "${{ secrets.AZURE_LOCATION }}"
+          owner                     = "MLOps Team"
+          cost_center               = "ML Engineering"
+          business_unit             = "Data Science"
+          
+          # Network Configuration
+          allowed_subnet_cidr       = "10.0.0.0/8"
+          enable_private_endpoints  = false
+          enable_purge_protection   = false
+          
+          # Compute Configuration
+          ml_compute_name          = "cpu-cluster"
+          aks_node_count          = 2
+          aks_vm_size             = "Standard_D4s_v3"
+          aks_enable_auto_scaling = true
+          aks_min_nodes           = 1
+          aks_max_nodes           = 5
+          
+          # Monitoring
+          enable_container_insights = true
+          log_retention_days       = 30
+          
+          # Security
+          enable_network_policy    = true
+          enable_rbac             = true
+          enable_aad_integration  = true
+          
+          # Cost Management
+          enable_cost_alerts      = true
+          monthly_budget_amount   = 1000
+          budget_alert_threshold  = 80
+          
+          # DevOps Integration
+          enable_devops_integration = true
+          devops_project_name       = "MLOps Project"
+          
+          # Services
+          enable_data_factory      = true
+          enable_synapse          = false
+          enable_cognitive_services = false
+          
+          # Notifications
+          notification_email       = "${{ secrets.NOTIFICATION_EMAIL }}"
+          enable_slack_notifications = false
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform plan -out=tfplan-dev -no-color
+          terraform show -json tfplan-dev > tfplan-dev.json
+        continue-on-error: true
+
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const plan = '${{ steps.plan.outputs.stdout }}';
+            
+            const output = `#### Terraform Plan - Development 📝
+            
+            \`\`\`
+            ${plan.substring(0, 60000)}
+            \`\`\`
+            
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Upload Dev Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev
+          path: |
+            ${{ env.WORKING_DIR }}/tfplan-dev
+            ${{ env.WORKING_DIR }}/tfplan-dev.json
+
+  terraform-apply-dev:
+    name: Deploy - Development
+    needs: terraform-plan-dev
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.destroy == false) || (github.event_name == 'push' && github.ref == 'refs/heads/deployment-pipeline')
+    environment:
+      name: dev
+      url: https://portal.azure.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
+
+      - name: Download Dev Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-dev
+          path: ${{ env.WORKING_DIR }}
+
+      - name: Verify Terraform Backend
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          echo "Using backend configuration from backend.tf"
+          cat backend.tf
+
+      - name: Terraform Init
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform init
+
+      - name: Terraform Apply
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform apply -auto-approve tfplan-dev
+
+      - name: Terraform Output
+        id: output
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform output -json > outputs-dev.json
+          cat outputs-dev.json
+
+      - name: Upload Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs-dev
+          path: ${{ env.WORKING_DIR }}/outputs-dev.json
+
+      - name: Configure Azure ML Workspace
+        run: |
+          # Install Azure ML CLI extension
+          az extension add -n ml --upgrade -y
+          
+          # Get workspace details from Terraform outputs
+          cd ${{ env.WORKING_DIR }}
+          WORKSPACE_NAME=$(jq -r '.ml_workspace_name.value' outputs-dev.json)
+          RESOURCE_GROUP=$(jq -r '.resource_group_name.value' outputs-dev.json)
+          SUBSCRIPTION_ID=$(jq -r '.deployment_summary.value.subscription_id' outputs-dev.json 2>/dev/null || az account show --query id -o tsv)
+          
+          echo "ML Workspace: $WORKSPACE_NAME"
+          echo "Resource Group: $RESOURCE_GROUP"
+          echo "Subscription: $SUBSCRIPTION_ID"
+          
+          # Set as GitHub output for other workflows
+          echo "ml_workspace_name=$WORKSPACE_NAME" >> $GITHUB_OUTPUT
+          echo "resource_group_name=$RESOURCE_GROUP" >> $GITHUB_OUTPUT
+          echo "subscription_id=$SUBSCRIPTION_ID" >> $GITHUB_OUTPUT
+
+      - name: Create Deployment Summary
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          
+          echo "## 🚀 Infrastructure Deployment - Development" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployed Resources" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Name |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | $(jq -r '.resource_group_name.value' outputs-dev.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| ML Workspace | $(jq -r '.ml_workspace_name.value' outputs-dev.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| AKS Cluster | $(jq -r '.aks_cluster_name.value' outputs-dev.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Storage Account | $(jq -r '.storage_account_name.value' outputs-dev.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Registry | $(jq -r '.container_registry_name.value' outputs-dev.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Key Vault | $(jq -r '.key_vault_name.value' outputs-dev.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. Navigate to [Azure ML Studio](https://ml.azure.com)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run training job: \`az ml job create --file src/job.yml\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Monitor in Azure Portal: [Link](https://portal.azure.com/#@/resource$(jq -r '.ml_workspace_id.value' outputs-dev.json))" >> $GITHUB_STEP_SUMMARY
+
+  terraform-plan-prod:
+    name: Plan - Production
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod')
+    environment: 
+      name: prod-plan
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
+
+      - name: Verify Terraform Backend
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          echo "Using backend configuration from backend.tf"
+          cat backend.tf
+
+      - name: Create terraform.tfvars
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          
+          cat > terraform.tfvars << EOF
+          environment                = "prod"
+          project_name              = "${{ secrets.PROJECT_NAME }}"
+          location                  = "${{ secrets.AZURE_LOCATION }}"
+          owner                     = "MLOps Team"
+          cost_center               = "ML Engineering"
+          business_unit             = "Data Science"
+          
+          # Network Configuration - PRODUCTION SECURITY
+          allowed_subnet_cidr       = "10.0.0.0/8"
+          enable_private_endpoints  = true
+          enable_purge_protection   = true
+          
+          # Compute Configuration
+          ml_compute_name          = "cpu-cluster"
+          aks_node_count          = 3
+          aks_vm_size             = "Standard_D4s_v3"
+          aks_enable_auto_scaling = true
+          aks_min_nodes           = 2
+          aks_max_nodes           = 10
+          
+          # Monitoring
+          enable_container_insights = true
+          log_retention_days       = 90
+          
+          # Security
+          enable_network_policy    = true
+          enable_rbac             = true
+          enable_aad_integration  = true
+          
+          # Cost Management
+          enable_cost_alerts      = true
+          monthly_budget_amount   = 5000
+          budget_alert_threshold  = 80
+          
+          # DevOps Integration
+          enable_devops_integration = true
+          devops_project_name       = "MLOps Project"
+          
+          # Services
+          enable_data_factory      = true
+          enable_synapse          = false
+          enable_cognitive_services = false
+          
+          # Backup
+          enable_backup           = true
+          backup_retention_days   = 90
+          
+          # Notifications
+          notification_email       = "${{ secrets.NOTIFICATION_EMAIL }}"
+          enable_slack_notifications = false
+          # slack_webhook_url        = "${{ secrets.SLACK_WEBHOOK_URL }}"
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform init
+
+      - name: Terraform Plan
+        id: plan
+        # env:
+        #   SLACK_NOTIFY: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        #   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform plan -out=tfplan-prod -no-color
+          terraform show -json tfplan-prod > tfplan-prod.json
+        continue-on-error: true
+
+      - name: Upload Prod Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-prod
+          path: |
+            ${{ env.WORKING_DIR }}/tfplan-prod
+            ${{ env.WORKING_DIR }}/tfplan-prod.json
+
+  terraform-apply-prod:
+    name: Deploy - Production
+    needs: terraform-plan-prod
+    runs-on: ubuntu-latest
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod' && github.event.inputs.destroy == false)
+    environment:
+      name: production
+      url: https://portal.azure.com
+    # env:
+    #   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
+
+      - name: Download Prod Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-prod
+          path: ${{ env.WORKING_DIR }}
+
+      - name: Verify Terraform Backend
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          echo "Using backend configuration from backend.tf"
+          cat backend.tf
+
+      - name: Terraform Init
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform init
+
+      - name: Terraform Apply
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform apply -auto-approve tfplan-prod
+
+      - name: Terraform Output
+        id: output
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform output -json > outputs-prod.json
+          cat outputs-prod.json
+
+      - name: Upload Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs-prod
+          path: ${{ env.WORKING_DIR }}/outputs-prod.json
+
+      # Slack notification - Uncomment when SLACK_WEBHOOK_URL secret is configured
+      # - name: Send Slack Notification
+      #   if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+      #   uses: slackapi/slack-github-action@v1
+      #   with:
+      #     payload: |
+      #       {
+      #         "text": "🚀 Production Infrastructure Deployed",
+      #         "blocks": [
+      #           {
+      #             "type": "header",
+      #             "text": {
+      #               "type": "plain_text",
+      #               "text": "🚀 Production Infrastructure Deployed"
+      #             }
+      #           },
+      #           {
+      #             "type": "section",
+      #             "fields": [
+      #               {
+      #                 "type": "mrkdwn",
+      #                 "text": "*Environment:*\nProduction"
+      #               },
+      #               {
+      #                 "type": "mrkdwn",
+      #                 "text": "*Deployed by:*\n${{ github.actor }}"
+      #               }
+      #             ]
+      #           }
+      #         ]
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      #     SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Create Deployment Summary
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          
+          echo "## 🚀 Infrastructure Deployment - Production" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployed Resources" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Name |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | $(jq -r '.resource_group_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| ML Workspace | $(jq -r '.ml_workspace_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| AKS Cluster | $(jq -r '.aks_cluster_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Storage Account | $(jq -r '.storage_account_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Registry | $(jq -r '.container_registry_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Key Vault | $(jq -r '.key_vault_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
