@@ -110,8 +110,8 @@ resource "azuread_application" "mlops_cicd" {
 }
 
 resource "azuread_service_principal" "mlops_cicd" {
-  application_id = azuread_application.mlops_cicd.application_id
-  use_existing   = true
+  client_id    = azuread_application.mlops_cicd.client_id
+  use_existing = true
 
   tags = ["MLOps", "CI/CD", local.environment]
 }
@@ -210,7 +210,7 @@ resource "azurerm_key_vault_access_policy" "cicd" {
 # Store CI/CD credentials in Key Vault
 resource "azurerm_key_vault_secret" "cicd_app_id" {
   name         = "cicd-app-id"
-  value        = azuread_application.mlops_cicd.application_id
+  value        = azuread_application.mlops_cicd.client_id
   key_vault_id = azurerm_key_vault.mlops.id
 
   depends_on = [azurerm_key_vault_access_policy.cicd]
