@@ -18,14 +18,7 @@ terraform {
     }
   }
 
-  # Configure remote state storage
-  backend "azurerm" {
-    # These values should be configured via terraform init -backend-config
-    # resource_group_name  = "mlops-terraform-state-rg"
-    # storage_account_name = "mlopstfstate"
-    # container_name      = "tfstate"
-    # key                 = "mlops.tfstate"
-  }
+  # Remote backend configured in backend.tf
 }
 
 # Configure the Azure Provider
