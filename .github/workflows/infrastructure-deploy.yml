@@ -91,22 +91,20 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
 
-      - name: Setup Terraform Backend
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).appId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).password }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
+
+      - name: Verify Terraform Backend
         run: |
           cd ${{ env.WORKING_DIR }}
-          
-          cat > backend.tf << EOF
-          terraform {
-            backend "azurerm" {
-              resource_group_name  = "${{ secrets.TF_STATE_RESOURCE_GROUP }}"
-              storage_account_name = "${{ secrets.TF_STATE_STORAGE_ACCOUNT }}"
-              container_name       = "tfstate"
-              key                  = "dev.tfstate"
-            }
-          }
-          EOF
+          echo "Using backend configuration from backend.tf"
+          cat backend.tf
 
       - name: Create terraform.tfvars
         run: |
@@ -227,7 +225,14 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).appId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).password }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
 
       - name: Download Dev Plan
         uses: actions/download-artifact@v4
@@ -235,20 +240,11 @@ jobs:
           name: tfplan-dev
           path: ${{ env.WORKING_DIR }}
 
-      - name: Setup Terraform Backend
+      - name: Verify Terraform Backend
         run: |
           cd ${{ env.WORKING_DIR }}
-          
-          cat > backend.tf << EOF
-          terraform {
-            backend "azurerm" {
-              resource_group_name  = "${{ secrets.TF_STATE_RESOURCE_GROUP }}"
-              storage_account_name = "${{ secrets.TF_STATE_STORAGE_ACCOUNT }}"
-              container_name       = "tfstate"
-              key                  = "dev.tfstate"
-            }
-          }
-          EOF
+          echo "Using backend configuration from backend.tf"
+          cat backend.tf
 
       - name: Terraform Init
         run: |
@@ -336,22 +332,20 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS_PROD }}
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
 
-      - name: Setup Terraform Backend
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).appId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).password }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
+
+      - name: Verify Terraform Backend
         run: |
           cd ${{ env.WORKING_DIR }}
-          
-          cat > backend.tf << EOF
-          terraform {
-            backend "azurerm" {
-              resource_group_name  = "${{ secrets.TF_STATE_RESOURCE_GROUP_PROD }}"
-              storage_account_name = "${{ secrets.TF_STATE_STORAGE_ACCOUNT_PROD }}"
-              container_name       = "tfstate"
-              key                  = "prod.tfstate"
-            }
-          }
-          EOF
+          echo "Using backend configuration from backend.tf"
+          cat backend.tf
 
       - name: Create terraform.tfvars
         run: |
@@ -458,7 +452,14 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS_PROD }}
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).appId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).password }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
 
       - name: Download Prod Plan
         uses: actions/download-artifact@v4
@@ -466,20 +467,11 @@ jobs:
           name: tfplan-prod
           path: ${{ env.WORKING_DIR }}
 
-      - name: Setup Terraform Backend
+      - name: Verify Terraform Backend
         run: |
           cd ${{ env.WORKING_DIR }}
-          
-          cat > backend.tf << EOF
-          terraform {
-            backend "azurerm" {
-              resource_group_name  = "${{ secrets.TF_STATE_RESOURCE_GROUP_PROD }}"
-              storage_account_name = "${{ secrets.TF_STATE_STORAGE_ACCOUNT_PROD }}"
-              container_name       = "tfstate"
-              key                  = "prod.tfstate"
-            }
-          }
-          EOF
+          echo "Using backend configuration from backend.tf"
+          cat backend.tf
 
       - name: Terraform Init
         run: |
