@@ -129,12 +129,7 @@ resource "azurerm_logic_app_workflow" "cost_optimization" {
     })
   }
 
-  workflow_parameters = {
-    "$connections" = {
-      defaultValue = ""
-      type         = "Object"
-    }
-  }
+  # Removed workflow_parameters: Terraform expects map(string) per element; defining schema here causes type errors.
 
   tags = local.common_tags
 }
