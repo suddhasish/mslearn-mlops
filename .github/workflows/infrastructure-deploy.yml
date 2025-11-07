@@ -7,14 +7,14 @@ on:
   push:
     branches:
       - main
-      - develop
+      - deployment-pipeline
     paths:
       - 'infrastructure/**'
       - '.github/workflows/infrastructure-deploy.yml'
   pull_request:
     branches:
       - main
-      - develop
+      - deployment-pipeline
     paths:
       - 'infrastructure/**'
   workflow_dispatch:
@@ -80,7 +80,7 @@ jobs:
     name: Plan - Development
     needs: terraform-validate
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev') || (github.event_name == 'push' && github.ref == 'refs/heads/deployment-pipeline')
     environment: 
       name: dev-plan
     steps:
@@ -213,7 +213,7 @@ jobs:
     name: Deploy - Development
     needs: terraform-plan-dev
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.destroy == false
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.destroy == false) || (github.event_name == 'push' && github.ref == 'refs/heads/deployment-pipeline')
     environment:
       name: dev
       url: https://portal.azure.com
