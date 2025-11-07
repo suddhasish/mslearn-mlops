@@ -120,7 +120,7 @@ resource "azurerm_subnet" "private_endpoint_subnet" {
   virtual_network_name = azurerm_virtual_network.mlops.name
   address_prefixes     = ["10.0.3.0/24"]
 
-  private_endpoint_network_policies_enabled = false
+  private_endpoint_network_policies = "Disabled"
 }
 
 # Network Security Groups

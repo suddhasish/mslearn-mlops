@@ -164,7 +164,7 @@ output "front_door_endpoint_hostname" {
 # Service Principal for CI/CD
 output "cicd_service_principal_application_id" {
   description = "Application ID of the CI/CD service principal"
-  value       = azuread_application.mlops_cicd.application_id
+  value       = azuread_application.mlops_cicd.client_id
 }
 
 output "cicd_service_principal_object_id" {

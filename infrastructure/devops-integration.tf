@@ -21,7 +21,7 @@ resource "azurerm_powerbi_embedded" "mlops_analytics" {
   name                = "${local.resource_prefix}-pbi"
   location            = azurerm_resource_group.mlops.location
   resource_group_name = azurerm_resource_group.mlops.name
-  sku                 = "A1"
+  sku_name            = "A1"
   administrators      = [data.azurerm_client_config.current.object_id]
 
   tags = local.common_tags
@@ -212,9 +212,9 @@ resource "azurerm_cognitive_account" "text_analytics" {
   kind                = "TextAnalytics"
   sku_name            = "S0"
 
-  network_acls {
-    default_action = "Allow"
-  }
+  # network_acls {
+  #   default_action = "Allow"
+  # }
 
   tags = local.common_tags
 }

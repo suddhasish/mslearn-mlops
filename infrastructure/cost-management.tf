@@ -131,7 +131,7 @@ resource "azurerm_logic_app_workflow" "cost_optimization" {
 
   workflow_parameters = {
     "$connections" = {
-      defaultValue = {}
+      defaultValue = ""
       type         = "Object"
     }
   }
