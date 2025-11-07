@@ -213,7 +213,7 @@ jobs:
     name: Deploy - Development
     needs: terraform-plan-dev
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.destroy == false
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.destroy != 'true'
     environment:
       name: dev
       url: https://portal.azure.com
