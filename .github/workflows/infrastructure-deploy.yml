@@ -26,6 +26,11 @@ on:
         options:
           - dev
           - prod
+      branch:
+        description: 'Branch to deploy from'
+        required: false
+        type: string
+        default: 'deployment-pipeline'
       destroy:
         description: 'Destroy infrastructure'
         required: false
@@ -86,6 +91,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -220,6 +227,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -327,6 +336,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
