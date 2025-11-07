@@ -149,6 +149,86 @@ resource "azurerm_network_security_group" "ml_nsg" {
   tags = local.common_tags
 }
 
+# Network Security Group for AKS
+resource "azurerm_network_security_group" "aks_nsg" {
+  name                = "${local.resource_prefix}-aks-nsg"
+  location            = azurerm_resource_group.mlops.location
+  resource_group_name = azurerm_resource_group.mlops.name
+
+  # Allow inbound from Azure Load Balancer
+  security_rule {
+    name                       = "AllowAzureLoadBalancer"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "AzureLoadBalancer"
+    destination_address_prefix = "*"
+  }
+
+  # Allow inbound HTTPS
+  security_rule {
+    name                       = "AllowHTTPS"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = var.allowed_subnet_cidr
+    destination_address_prefix = "*"
+  }
+
+  # Allow inbound API server (for private clusters)
+  security_rule {
+    name                       = "AllowAPIServer"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "6443"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "*"
+  }
+
+  # Allow tunnel front (for private clusters)
+  security_rule {
+    name                       = "AllowTunnelFront"
+    priority                   = 130
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "9000"
+    source_address_prefix      = "AzureCloud"
+    destination_address_prefix = "*"
+  }
+
+  # Deny all other inbound traffic
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  tags = local.common_tags
+}
+
+# Associate NSG with AKS subnet
+resource "azurerm_subnet_network_security_group_association" "aks_nsg_association" {
+  subnet_id                 = azurerm_subnet.aks_subnet.id
+  network_security_group_id = azurerm_network_security_group.aks_nsg.id
+}
+
 # Associate NSG with ML subnet
 resource "azurerm_subnet_network_security_group_association" "ml_nsg_association" {
   subnet_id                 = azurerm_subnet.ml_subnet.id
