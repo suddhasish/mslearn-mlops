@@ -98,7 +98,7 @@ jobs:
           echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
           echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
-          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
 
       - name: Verify Terraform Backend
         run: |
@@ -232,7 +232,7 @@ jobs:
           echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
           echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
-          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
 
       - name: Download Dev Plan
         uses: actions/download-artifact@v4
@@ -339,7 +339,7 @@ jobs:
           echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
           echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
-          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
 
       - name: Verify Terraform Backend
         run: |
@@ -459,7 +459,7 @@ jobs:
           echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
           echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
-          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
 
       - name: Download Prod Plan
         uses: actions/download-artifact@v4
