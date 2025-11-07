@@ -95,8 +95,8 @@ jobs:
 
       - name: Setup Terraform Environment Variables
         run: |
-          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).appId }}" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).password }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
 
@@ -229,8 +229,8 @@ jobs:
 
       - name: Setup Terraform Environment Variables
         run: |
-          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).appId }}" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).password }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
 
@@ -336,8 +336,8 @@ jobs:
 
       - name: Setup Terraform Environment Variables
         run: |
-          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).appId }}" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).password }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
 
@@ -456,8 +456,8 @@ jobs:
 
       - name: Setup Terraform Environment Variables
         run: |
-          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).appId }}" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).password }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenant }}" >> $GITHUB_ENV
 
