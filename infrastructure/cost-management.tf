@@ -40,48 +40,6 @@ resource "azurerm_consumption_budget_resource_group" "mlops_budget" {
 }
 
 # Azure Cost Management Export for detailed billing analysis
-resource "azurerm_cost_management_export_resource_group" "mlops_export" {
-  name                    = "${local.resource_prefix}-cost-export"
-  resource_group_id       = azurerm_resource_group.mlops.id
-  recurrence_type         = "Daily"
-  recurrence_period_start = formatdate("YYYY-MM-01'T'00:00:00'Z'", timestamp())
-  recurrence_period_end   = formatdate("YYYY-MM-01'T'00:00:00'Z'", timeadd(timestamp(), "8760h"))
-
-  delivery_info {
-    storage_account_id = azurerm_storage_account.mlops.id
-    container_name     = azurerm_storage_container.cost_exports.name
-    root_folder_path   = "cost-exports"
-  }
-
-  query {
-    type       = "ActualCost"
-    time_frame = "MonthToDate"
-
-    dataset {
-      granularity = "Daily"
-
-      aggregation {
-        name   = "Cost"
-        column = "Cost"
-      }
-
-      aggregation {
-        name   = "PreTaxCost"
-        column = "PreTaxCost"
-      }
-
-      grouping {
-        name = "ResourceType"
-        type = "Dimension"
-      }
-
-      grouping {
-        name = "ResourceGroupName"
-        type = "Dimension"
-      }
-    }
-  }
-}
 
 # Storage container for cost exports
 resource "azurerm_storage_container" "cost_exports" {
