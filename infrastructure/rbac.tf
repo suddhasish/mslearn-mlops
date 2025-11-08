@@ -3,6 +3,7 @@
 
 # Custom Role Definitions
 resource "azurerm_role_definition" "ml_data_scientist" {
+  count = var.enable_custom_roles ? 1 : 0
   name  = "MLOps Data Scientist"
   scope = azurerm_resource_group.mlops.id
 
@@ -38,6 +39,7 @@ resource "azurerm_role_definition" "ml_data_scientist" {
 }
 
 resource "azurerm_role_definition" "ml_engineer" {
+  count = var.enable_custom_roles ? 1 : 0
   name  = "MLOps Engineer"
   scope = azurerm_resource_group.mlops.id
 
@@ -69,6 +71,7 @@ resource "azurerm_role_definition" "ml_engineer" {
 }
 
 resource "azurerm_role_definition" "ml_viewer" {
+  count = var.enable_custom_roles ? 1 : 0
   name  = "MLOps Viewer"
   scope = azurerm_resource_group.mlops.id
 
@@ -95,6 +98,7 @@ resource "azurerm_role_definition" "ml_viewer" {
 
 # Service Principal for CI/CD
 resource "azuread_application" "mlops_cicd" {
+  count        = var.enable_cicd_identity ? 1 : 0
   display_name = "${local.resource_prefix}-cicd-app"
 
   required_resource_access {
@@ -110,29 +114,33 @@ resource "azuread_application" "mlops_cicd" {
 }
 
 resource "azuread_service_principal" "mlops_cicd" {
-  client_id    = azuread_application.mlops_cicd.client_id
+  count        = var.enable_cicd_identity ? 1 : 0
+  client_id    = azuread_application.mlops_cicd[0].client_id
   use_existing = true
 
   tags = ["MLOps", "CI/CD", local.environment]
 }
 
 resource "azuread_application_password" "mlops_cicd" {
-  application_object_id = azuread_application.mlops_cicd.object_id
+  count                 = var.enable_cicd_identity ? 1 : 0
+  application_object_id = azuread_application.mlops_cicd[0].object_id
   display_name          = "CI/CD Secret"
   end_date_relative     = "8760h" # 1 year
 }
 
 # Role Assignments for Service Principal
 resource "azurerm_role_assignment" "cicd_ml_engineer" {
+  count              = var.enable_cicd_identity && var.enable_custom_roles ? 1 : 0
   scope              = azurerm_resource_group.mlops.id
-  role_definition_id = azurerm_role_definition.ml_engineer.role_definition_resource_id
-  principal_id       = azuread_service_principal.mlops_cicd.object_id
+  role_definition_id = azurerm_role_definition.ml_engineer[0].role_definition_resource_id
+  principal_id       = azuread_service_principal.mlops_cicd[0].object_id
 }
 
 resource "azurerm_role_assignment" "cicd_aks_contributor" {
+  count                = var.enable_cicd_identity ? 1 : 0
   scope                = azurerm_kubernetes_cluster.mlops.id
   role_definition_name = "Azure Kubernetes Service Cluster User Role"
-  principal_id         = azuread_service_principal.mlops_cicd.object_id
+  principal_id         = azuread_service_principal.mlops_cicd[0].object_id
 }
 
 # Managed Identity for ML Workspace
@@ -196,9 +204,10 @@ resource "azurerm_key_vault_access_policy" "ml_workspace" {
 
 # Key Vault Access Policy for CI/CD Service Principal
 resource "azurerm_key_vault_access_policy" "cicd" {
+  count        = var.enable_cicd_identity ? 1 : 0
   key_vault_id = azurerm_key_vault.mlops.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
-  object_id    = azuread_service_principal.mlops_cicd.object_id
+  object_id    = azuread_service_principal.mlops_cicd[0].object_id
 
   secret_permissions = [
     "Get",
@@ -209,8 +218,9 @@ resource "azurerm_key_vault_access_policy" "cicd" {
 
 # Store CI/CD credentials in Key Vault
 resource "azurerm_key_vault_secret" "cicd_app_id" {
+  count        = var.enable_cicd_identity ? 1 : 0
   name         = "cicd-app-id"
-  value        = azuread_application.mlops_cicd.client_id
+  value        = azuread_application.mlops_cicd[0].client_id
   key_vault_id = azurerm_key_vault.mlops.id
 
   depends_on = [azurerm_key_vault_access_policy.cicd]
@@ -219,8 +229,9 @@ resource "azurerm_key_vault_secret" "cicd_app_id" {
 }
 
 resource "azurerm_key_vault_secret" "cicd_app_secret" {
+  count        = var.enable_cicd_identity ? 1 : 0
   name         = "cicd-app-secret"
-  value        = azuread_application_password.mlops_cicd.value
+  value        = azuread_application_password.mlops_cicd[0].value
   key_vault_id = azurerm_key_vault.mlops.id
 
   depends_on = [azurerm_key_vault_access_policy.cicd]
@@ -229,6 +240,7 @@ resource "azurerm_key_vault_secret" "cicd_app_secret" {
 }
 
 resource "azurerm_key_vault_secret" "tenant_id" {
+  count        = var.enable_cicd_identity ? 1 : 0
   name         = "tenant-id"
   value        = data.azurerm_client_config.current.tenant_id
   key_vault_id = azurerm_key_vault.mlops.id
@@ -239,6 +251,7 @@ resource "azurerm_key_vault_secret" "tenant_id" {
 }
 
 resource "azurerm_key_vault_secret" "subscription_id" {
+  count        = var.enable_cicd_identity ? 1 : 0
   name         = "subscription-id"
   value        = data.azurerm_client_config.current.subscription_id
   key_vault_id = azurerm_key_vault.mlops.id

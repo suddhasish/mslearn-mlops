@@ -17,7 +17,7 @@ resource "azurerm_data_factory" "devops_analytics" {
 
 # Power BI Embedded for business dashboards
 resource "azurerm_powerbi_embedded" "mlops_analytics" {
-  count = var.enable_devops_integration ? 1 : 0
+  count = (var.enable_devops_integration && var.enable_powerbi) ? 1 : 0
   # Name must be 4-64 chars and contain only lowercase letters or numbers
   name                = "${local.resource_prefix_pbi}pbi"
   location            = azurerm_resource_group.mlops.location
@@ -30,7 +30,7 @@ resource "azurerm_powerbi_embedded" "mlops_analytics" {
 
 # SQL Database for DevOps metrics and reporting
 resource "azurerm_mssql_server" "devops_analytics" {
-  count                        = var.enable_devops_integration ? 1 : 0
+  count                        = (var.enable_devops_integration && var.enable_mssql) ? 1 : 0
   name                         = "${local.resource_prefix}-sql-${local.suffix}"
   resource_group_name          = azurerm_resource_group.mlops.name
   location                     = azurerm_resource_group.mlops.location
@@ -48,7 +48,7 @@ resource "azurerm_mssql_server" "devops_analytics" {
 }
 
 resource "azurerm_mssql_database" "devops_metrics" {
-  count     = var.enable_devops_integration ? 1 : 0
+  count     = (var.enable_devops_integration && var.enable_mssql) ? 1 : 0
   name      = "DevOpsMetrics"
   server_id = azurerm_mssql_server.devops_analytics[0].id
   collation = "SQL_Latin1_General_CP1_CI_AS"
@@ -61,19 +61,20 @@ resource "azurerm_mssql_database" "devops_metrics" {
 }
 
 resource "random_password" "sql_admin" {
-  count   = var.enable_devops_integration ? 1 : 0
+  count   = (var.enable_devops_integration && var.enable_mssql) ? 1 : 0
   length  = 16
   special = true
 }
 
 # Store SQL admin password in Key Vault
 resource "azurerm_key_vault_secret" "sql_admin_password" {
-  count        = var.enable_devops_integration ? 1 : 0
+  count        = (var.enable_devops_integration && var.enable_mssql) ? 1 : 0
   name         = "sql-admin-password"
   value        = random_password.sql_admin[0].result
   key_vault_id = azurerm_key_vault.mlops.id
 
-  depends_on = [azurerm_key_vault_access_policy.cicd]
+  # Ensure Key Vault exists; do not require CI/CD access policy to allow MVP without AAD app
+  depends_on = [azurerm_key_vault.mlops]
 
   tags = local.common_tags
 }
@@ -251,6 +252,7 @@ resource "random_password" "synapse_admin" {
 
 # Communication Services for notifications
 resource "azurerm_communication_service" "mlops" {
+  count               = var.enable_communication_service ? 1 : 0
   name                = "${local.resource_prefix}-communication"
   resource_group_name = azurerm_resource_group.mlops.name
   data_location       = "United States"

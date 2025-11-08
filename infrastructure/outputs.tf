@@ -164,12 +164,12 @@ output "front_door_endpoint_hostname" {
 # Service Principal for CI/CD
 output "cicd_service_principal_application_id" {
   description = "Application ID of the CI/CD service principal"
-  value       = azuread_application.mlops_cicd.client_id
+  value       = var.enable_cicd_identity ? azuread_application.mlops_cicd[0].client_id : null
 }
 
 output "cicd_service_principal_object_id" {
   description = "Object ID of the CI/CD service principal"
-  value       = azuread_service_principal.mlops_cicd.object_id
+  value       = var.enable_cicd_identity ? azuread_service_principal.mlops_cicd[0].object_id : null
 }
 
 # Budget Information
@@ -214,12 +214,12 @@ output "devops_integration_enabled" {
 
 output "powerbi_embedded_name" {
   description = "Name of the Power BI Embedded instance (if enabled)"
-  value       = var.enable_devops_integration ? azurerm_powerbi_embedded.mlops_analytics[0].name : null
+  value       = (var.enable_devops_integration && var.enable_powerbi) ? azurerm_powerbi_embedded.mlops_analytics[0].name : null
 }
 
 output "sql_server_name" {
   description = "Name of the SQL Server for DevOps analytics (if enabled)"
-  value       = var.enable_devops_integration ? azurerm_mssql_server.devops_analytics[0].name : null
+  value       = (var.enable_devops_integration && var.enable_mssql) ? azurerm_mssql_server.devops_analytics[0].name : null
 }
 
 # Environment and Project Information
@@ -253,7 +253,7 @@ output "automation_account_name" {
 # Communication Services
 output "communication_service_name" {
   description = "Name of the Communication Service for notifications"
-  value       = azurerm_communication_service.mlops.name
+  value       = var.enable_communication_service ? azurerm_communication_service.mlops[0].name : null
 }
 
 # Synapse Analytics (if enabled)

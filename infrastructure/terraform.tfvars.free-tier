@@ -36,6 +36,14 @@ notification_email = "your-email@example.com"
 # Disable DevOps integration (Function App, SQL, Power BI, Stream Analytics)
 enable_devops_integration = false
 
+# Fine-grained controls (keep all disabled for free tier)
+enable_powerbi = false
+enable_mssql   = false
+enable_logic_app = false
+enable_communication_service = false
+enable_custom_roles = false
+enable_cicd_identity = false
+
 # Disable Synapse Analytics (expensive)
 enable_synapse = false
 
@@ -108,6 +116,7 @@ enable_rbac = true
 
 # Set low budget alerts (free)
 monthly_budget_amount = 50  # Alert if spending exceeds $50/month
+enable_cost_alerts    = true
 
 # ============================================================================
 # Tags (NO COST)

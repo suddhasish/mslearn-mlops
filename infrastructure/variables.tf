@@ -206,6 +206,43 @@ variable "enable_cognitive_services" {
   default     = false
 }
 
+# Optional integrations and identities (guard premium/tenant-scoped features for MVP)
+variable "enable_powerbi" {
+  description = "Deploy Power BI Embedded resource."
+  type        = bool
+  default     = false
+}
+
+variable "enable_mssql" {
+  description = "Deploy MSSQL server + database for DevOps metrics."
+  type        = bool
+  default     = false
+}
+
+variable "enable_logic_app" {
+  description = "Deploy Logic App for cost optimization automation."
+  type        = bool
+  default     = false
+}
+
+variable "enable_communication_service" {
+  description = "Deploy Azure Communication Service (requires provider registration)."
+  type        = bool
+  default     = false
+}
+
+variable "enable_custom_roles" {
+  description = "Create custom RBAC role definitions (requires elevated permissions)."
+  type        = bool
+  default     = false
+}
+
+variable "enable_cicd_identity" {
+  description = "Provision AzureAD application/SP and store credentials in Key Vault for CI/CD (requires AAD app create permissions)."
+  type        = bool
+  default     = false
+}
+
 # Backup and Disaster Recovery
 variable "enable_backup" {
   description = "Enable backup for critical resources"

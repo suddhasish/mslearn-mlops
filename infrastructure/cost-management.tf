@@ -3,6 +3,7 @@
 
 # Budget for the MLOps resource group
 resource "azurerm_consumption_budget_resource_group" "mlops_budget" {
+  count             = var.enable_cost_alerts ? 1 : 0
   name              = "${local.resource_prefix}-budget"
   resource_group_id = azurerm_resource_group.mlops.id
 
@@ -15,7 +16,7 @@ resource "azurerm_consumption_budget_resource_group" "mlops_budget" {
   }
 
   dynamic "notification" {
-    for_each = var.enable_cost_alerts ? [1] : []
+    for_each = (var.enable_cost_alerts && var.notification_email != "") ? [1] : []
     content {
       enabled        = true
       threshold      = var.budget_alert_threshold
@@ -27,7 +28,7 @@ resource "azurerm_consumption_budget_resource_group" "mlops_budget" {
   }
 
   dynamic "notification" {
-    for_each = var.enable_cost_alerts ? [1] : []
+    for_each = (var.enable_cost_alerts && var.notification_email != "") ? [1] : []
     content {
       enabled        = true
       threshold      = var.budget_alert_threshold * 0.8 # 80% of the main threshold
@@ -115,7 +116,7 @@ resource "azurerm_role_assignment" "df_storage_access" {
 
 # Logic App for automated cost optimization actions
 resource "azurerm_logic_app_workflow" "cost_optimization" {
-  count               = var.enable_cost_alerts ? 1 : 0
+  count               = (var.enable_cost_alerts && var.enable_logic_app) ? 1 : 0
   name                = "${local.resource_prefix}-cost-optimization"
   location            = azurerm_resource_group.mlops.location
   resource_group_name = azurerm_resource_group.mlops.name
