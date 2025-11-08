@@ -232,6 +232,7 @@ resource "azurerm_automation_schedule" "cost_optimization_schedule" {
 # Link runbook to schedule
 resource "azurerm_automation_job_schedule" "cost_optimization_job" {
   count                   = var.enable_cost_alerts ? 1 : 0
+  name                    = "${local.resource_prefix}-cost-opt-job"
   resource_group_name     = azurerm_resource_group.mlops.name
   automation_account_name = azurerm_automation_account.cost_optimization[0].name
   schedule_name           = azurerm_automation_schedule.cost_optimization_schedule[0].name
@@ -239,6 +240,6 @@ resource "azurerm_automation_job_schedule" "cost_optimization_job" {
 
   parameters = {
     resourcegroupname = azurerm_resource_group.mlops.name
-  aksclustername    = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].name : null
+    aksclustername    = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].name : ""
   }
 }
