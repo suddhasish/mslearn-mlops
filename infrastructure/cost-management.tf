@@ -3,7 +3,8 @@
 
 # Budget for the MLOps resource group
 resource "azurerm_consumption_budget_resource_group" "mlops_budget" {
-  count             = var.enable_cost_alerts ? 1 : 0
+  # Only create the budget if alerts are enabled AND an email is provided (provider requires at least 1 notification block)
+  count             = (var.enable_cost_alerts && var.notification_email != "") ? 1 : 0
   name              = "${local.resource_prefix}-budget"
   resource_group_id = azurerm_resource_group.mlops.id
 
@@ -16,7 +17,7 @@ resource "azurerm_consumption_budget_resource_group" "mlops_budget" {
   }
 
   dynamic "notification" {
-    for_each = (var.enable_cost_alerts && var.notification_email != "") ? [1] : []
+    for_each = [1]
     content {
       enabled        = true
       threshold      = var.budget_alert_threshold
@@ -28,7 +29,7 @@ resource "azurerm_consumption_budget_resource_group" "mlops_budget" {
   }
 
   dynamic "notification" {
-    for_each = (var.enable_cost_alerts && var.notification_email != "") ? [1] : []
+    for_each = [1]
     content {
       enabled        = true
       threshold      = var.budget_alert_threshold * 0.8 # 80% of the main threshold
