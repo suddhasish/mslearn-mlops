@@ -98,6 +98,22 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CLIENT_SECRET }}
 
+      - name: Validate required secrets
+        run: |
+          set -e
+          MISSING=0
+          if [ -z "${{ secrets.PROJECT_NAME }}" ]; then
+            echo "Error: PROJECT_NAME secret is not set. Please add it in Settings > Secrets and variables > Actions." >&2
+            MISSING=1
+          fi
+          if [ -z "${{ secrets.AZURE_CLIENT_SECRET }}" ]; then
+            echo "Error: AZURE_CLIENT_SECRET secret is not set." >&2
+            MISSING=1
+          fi
+          if [ $MISSING -ne 0 ]; then
+            exit 1
+          fi
+
       - name: Setup Terraform Environment Variables
         run: |
           echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
@@ -115,10 +131,15 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR }}
           
+          LOCATION="${{ secrets.AZURE_LOCATION }}"
+          if [ -z "$LOCATION" ]; then
+            LOCATION="eastus"
+          fi
+          
           cat > terraform.tfvars << EOF
           environment                = "dev"
           project_name              = "${{ secrets.PROJECT_NAME }}"
-          location                  = "${{ secrets.AZURE_LOCATION }}"
+          location                  = "$LOCATION"
           owner                     = "MLOps Team"
           cost_center               = "ML Engineering"
           business_unit             = "Data Science"
@@ -173,9 +194,25 @@ jobs:
         id: plan
         run: |
           cd ${{ env.WORKING_DIR }}
-          terraform plan -out=tfplan-dev -no-color
+          set -o pipefail
+          echo "Running terraform plan (dev)..."
+          terraform plan -out=tfplan-dev -no-color | tee tfplan-dev.txt
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "Terraform plan (dev) failed. Raw output saved to tfplan-dev.txt" >&2
+            exit 1
+          fi
           terraform show -json tfplan-dev > tfplan-dev.json
-        continue-on-error: true
+
+      - name: Summarize Dev Plan
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          echo "### Terraform Plan (Dev) Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          sed -n '1,200p' tfplan-dev.txt >> $GITHUB_STEP_SUMMARY || echo "(No plain-text plan captured)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "_Truncated to first 200 lines. Full plan is in artifact tfplan-dev._" >> $GITHUB_STEP_SUMMARY
+        # Remove continue-on-error to ensure failed plans stop the workflow
 
       - name: Comment PR with Plan
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
@@ -207,13 +244,14 @@ jobs:
           name: tfplan-dev
           path: |
             ${{ env.WORKING_DIR }}/tfplan-dev
+            ${{ env.WORKING_DIR }}/tfplan-dev.txt
             ${{ env.WORKING_DIR }}/tfplan-dev.json
 
   terraform-apply-dev:
     name: Deploy - Development
     needs: terraform-plan-dev
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.destroy == false
+    if: needs.terraform-plan-dev.result == 'success' && github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.destroy != 'true'
     environment:
       name: dev
       url: https://portal.azure.com
@@ -231,6 +269,22 @@ jobs:
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Validate required secrets
+        run: |
+          set -e
+          MISSING=0
+          if [ -z "${{ secrets.PROJECT_NAME }}" ]; then
+            echo "Error: PROJECT_NAME secret is not set. Please add it in Settings > Secrets and variables > Actions." >&2
+            MISSING=1
+          fi
+          if [ -z "${{ secrets.AZURE_CLIENT_SECRET }}" ]; then
+            echo "Error: AZURE_CLIENT_SECRET secret is not set." >&2
+            MISSING=1
+          fi
+          if [ $MISSING -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Setup Terraform Environment Variables
         run: |
@@ -356,10 +410,15 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR }}
           
+          LOCATION="${{ secrets.AZURE_LOCATION }}"
+          if [ -z "$LOCATION" ]; then
+            LOCATION="eastus"
+          fi
+          
           cat > terraform.tfvars << EOF
           environment                = "prod"
           project_name              = "${{ secrets.PROJECT_NAME }}"
-          location                  = "${{ secrets.AZURE_LOCATION }}"
+          location                  = "$LOCATION"
           owner                     = "MLOps Team"
           cost_center               = "ML Engineering"
           business_unit             = "Data Science"
@@ -422,9 +481,25 @@ jobs:
         #   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           cd ${{ env.WORKING_DIR }}
-          terraform plan -out=tfplan-prod -no-color
+          set -o pipefail
+          echo "Running terraform plan (prod)..."
+          terraform plan -out=tfplan-prod -no-color | tee tfplan-prod.txt
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "Terraform plan (prod) failed. Raw output saved to tfplan-prod.txt" >&2
+            exit 1
+          fi
           terraform show -json tfplan-prod > tfplan-prod.json
-        continue-on-error: true
+
+      - name: Summarize Prod Plan
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          echo "### Terraform Plan (Prod) Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          sed -n '1,200p' tfplan-prod.txt >> $GITHUB_STEP_SUMMARY || echo "(No plain-text plan captured)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "_Truncated to first 200 lines. Full plan is in artifact tfplan-prod._" >> $GITHUB_STEP_SUMMARY
+        # Remove continue-on-error to ensure failed plans stop the workflow
 
       - name: Upload Prod Plan
         uses: actions/upload-artifact@v4
@@ -432,13 +507,14 @@ jobs:
           name: tfplan-prod
           path: |
             ${{ env.WORKING_DIR }}/tfplan-prod
+            ${{ env.WORKING_DIR }}/tfplan-prod.txt
             ${{ env.WORKING_DIR }}/tfplan-prod.json
 
   terraform-apply-prod:
     name: Deploy - Production
     needs: terraform-plan-prod
     runs-on: ubuntu-latest
-    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod' && github.event.inputs.destroy == false)
+    if: needs.terraform-plan-prod.result == 'success' && ((github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod' && github.event.inputs.destroy != 'true'))
     environment:
       name: production
       url: https://portal.azure.com
