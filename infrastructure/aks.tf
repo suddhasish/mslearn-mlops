@@ -20,13 +20,13 @@ resource "azurerm_kubernetes_cluster" "mlops" {
     max_count           = var.aks_enable_auto_scaling ? var.aks_max_nodes : null
     os_disk_size_gb     = 100
     os_disk_type        = "Managed"
-    
+
     # Security - Use ephemeral OS disks for better security and performance
     temporary_name_for_rotation = "defaulttmp"
-    
+
     # Security - Enable encryption at host
     enable_host_encryption = var.environment == "prod" ? true : false
-    
+
     # Security - Only allow critical system pods on default pool
     only_critical_addons_enabled = false
 
@@ -49,14 +49,11 @@ resource "azurerm_kubernetes_cluster" "mlops" {
     load_balancer_sku = "standard"
   }
 
-  # Azure AD Integration (AKS-managed Entra Integration)
-  dynamic "azure_active_directory_role_based_access_control" {
-    for_each = var.enable_aad_integration ? [1] : []
-    content {
-      managed                = true
-      azure_rbac_enabled     = var.enable_rbac
-      tenant_id              = data.azurerm_client_config.current.tenant_id
-    }
+  # Azure AD / Entra ID Integration (managed) - always enabled per provider deprecation notice
+  azure_active_directory_role_based_access_control {
+    managed            = true
+    azure_rbac_enabled = var.enable_rbac
+    tenant_id          = data.azurerm_client_config.current.tenant_id
   }
 
   # Monitoring
@@ -70,10 +67,10 @@ resource "azurerm_kubernetes_cluster" "mlops" {
 
   # Security - Role-based access control
   role_based_access_control_enabled = var.enable_rbac
-  
+
   # Security - Local account disabled for production
   local_account_disabled = var.environment == "prod" ? true : false
-  
+
   # Security - API server access profile for private clusters
   dynamic "api_server_access_profile" {
     for_each = local.enable_private_endpoints ? [1] : []
@@ -82,22 +79,22 @@ resource "azurerm_kubernetes_cluster" "mlops" {
       subnet_id            = azurerm_subnet.aks_subnet.id
     }
   }
-  
+
   # Security - Key Vault secrets provider
   key_vault_secrets_provider {
     secret_rotation_enabled  = true
     secret_rotation_interval = "2m"
   }
-  
+
   # Security - Microsoft Defender for Containers
   microsoft_defender {
     log_analytics_workspace_id = azurerm_log_analytics_workspace.mlops.id
   }
-  
+
   # Security - Workload identity for pod-managed identities
   workload_identity_enabled = true
   oidc_issuer_enabled       = true
-  
+
   # Security - Image cleaner to remove unused images
   image_cleaner_enabled        = true
   image_cleaner_interval_hours = 48
