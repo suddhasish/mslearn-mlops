@@ -49,12 +49,9 @@ resource "azurerm_kubernetes_cluster" "mlops" {
     load_balancer_sku = "standard"
   }
 
-  # Azure AD / Entra ID Integration (managed) - provider schema for azurerm ~> 3.80
-  azure_active_directory_role_based_access_control {
-    managed            = true
-    azure_rbac_enabled = var.enable_rbac
-    tenant_id          = data.azurerm_client_config.current.tenant_id
-  }
+  # Azure AD / Entra ID Integration (managed)
+  # Note: Rely on provider defaults for managed Entra integration to avoid deprecation warnings.
+  # The provider enables managed Entra by default in current versions; remove explicit block.
 
   # Monitoring
   dynamic "oms_agent" {
