@@ -64,22 +64,22 @@ output "key_vault_uri" {
 # AKS Cluster
 output "aks_cluster_name" {
   description = "Name of the AKS cluster"
-  value       = azurerm_kubernetes_cluster.mlops.name
+  value       = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].name : null
 }
 
 output "aks_cluster_fqdn" {
   description = "FQDN of the AKS cluster"
-  value       = azurerm_kubernetes_cluster.mlops.fqdn
+  value       = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].fqdn : null
 }
 
 output "aks_cluster_id" {
   description = "Resource ID of the AKS cluster"
-  value       = azurerm_kubernetes_cluster.mlops.id
+  value       = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].id : null
 }
 
 output "aks_kube_config" {
   description = "Kubernetes configuration for the AKS cluster"
-  value       = azurerm_kubernetes_cluster.mlops.kube_config_raw
+  value       = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].kube_config_raw : null
   sensitive   = true
 }
 
@@ -268,7 +268,7 @@ output "deployment_summary" {
   value = {
     resource_group       = azurerm_resource_group.mlops.name
     ml_workspace         = azurerm_machine_learning_workspace.mlops.name
-    aks_cluster          = azurerm_kubernetes_cluster.mlops.name
+    aks_cluster          = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].name : null
     storage_account      = azurerm_storage_account.mlops.name
     container_registry   = azurerm_container_registry.mlops.name
     key_vault            = azurerm_key_vault.mlops.name

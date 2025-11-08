@@ -85,7 +85,7 @@ resource "azurerm_monitor_metric_alert" "storage_availability" {
 resource "azurerm_monitor_metric_alert" "aks_cpu_usage" {
   name                = "${local.resource_prefix}-aks-cpu-usage"
   resource_group_name = azurerm_resource_group.mlops.name
-  scopes              = [azurerm_kubernetes_cluster.mlops.id]
+  scopes              = var.enable_aks_deployment ? [azurerm_kubernetes_cluster.mlops[0].id] : []
   description         = "Alert when AKS CPU usage is high"
   severity            = 2
   frequency           = "PT5M"
@@ -109,7 +109,7 @@ resource "azurerm_monitor_metric_alert" "aks_cpu_usage" {
 resource "azurerm_monitor_metric_alert" "aks_memory_usage" {
   name                = "${local.resource_prefix}-aks-memory-usage"
   resource_group_name = azurerm_resource_group.mlops.name
-  scopes              = [azurerm_kubernetes_cluster.mlops.id]
+  scopes              = var.enable_aks_deployment ? [azurerm_kubernetes_cluster.mlops[0].id] : []
   description         = "Alert when AKS memory usage is high"
   severity            = 2
   frequency           = "PT5M"
@@ -260,7 +260,7 @@ resource "azurerm_monitor_diagnostic_setting" "ml_workspace" {
 
 resource "azurerm_monitor_diagnostic_setting" "aks" {
   name                       = "${local.resource_prefix}-aks-diag"
-  target_resource_id         = azurerm_kubernetes_cluster.mlops.id
+  target_resource_id         = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].id : null
   log_analytics_workspace_id = azurerm_log_analytics_workspace.mlops.id
 
   enabled_log {

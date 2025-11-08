@@ -138,7 +138,7 @@ resource "azurerm_role_assignment" "cicd_ml_engineer" {
 
 resource "azurerm_role_assignment" "cicd_aks_contributor" {
   count                = var.enable_cicd_identity ? 1 : 0
-  scope                = azurerm_kubernetes_cluster.mlops.id
+  scope                = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].id : null
   role_definition_name = "Azure Kubernetes Service Cluster User Role"
   principal_id         = azuread_service_principal.mlops_cicd[0].object_id
 }

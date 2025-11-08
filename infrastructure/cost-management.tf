@@ -239,6 +239,6 @@ resource "azurerm_automation_job_schedule" "cost_optimization_job" {
 
   parameters = {
     resourcegroupname = azurerm_resource_group.mlops.name
-    aksclustername    = azurerm_kubernetes_cluster.mlops.name
+  aksclustername    = var.enable_aks_deployment ? azurerm_kubernetes_cluster.mlops[0].name : null
   }
 }
