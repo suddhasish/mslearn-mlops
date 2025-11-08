@@ -1,0 +1,43 @@
+# DEV learning profile: enable AKS + API edge components to understand full-scale inference routing
+# Keep costs controlled with small node counts and public networking.
+
+# Core context
+project_name = "mlops-dev-learning"
+environment  = "dev"
+location     = "eastus"
+notification_email = "your-email@example.com"
+
+# Enable serving stack for learning
+enable_aks_deployment = true
+enable_api_management = true
+enable_front_door     = true
+enable_traffic_manager = true
+
+# Keep premium/tenant scoped extras OFF by default
+enable_powerbi = false
+enable_mssql   = false
+enable_logic_app = false
+enable_communication_service = false
+enable_custom_roles = false
+enable_cicd_identity = false
+
+# Networking: simplify for learning (turn on private later)
+enable_private_endpoints = false
+
+# AKS sizing (small)
+aks_enable_auto_scaling = false
+aks_node_count          = 1
+aks_vm_size             = "Standard_D4s_v3"
+
+# Monitoring & cost controls
+enable_container_insights = true
+log_retention_days = 30
+enable_cost_alerts  = true
+monthly_budget_amount = 75
+
+# Tags
+tags = {
+  Environment = "dev"
+  Scenario    = "edge-learning"
+  ManagedBy   = "Terraform"
+}

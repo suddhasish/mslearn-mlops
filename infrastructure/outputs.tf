@@ -142,23 +142,23 @@ output "ml_gpu_compute_cluster_name" {
 # API Management
 output "api_management_name" {
   description = "Name of the API Management instance"
-  value       = azurerm_api_management.mlops.name
+  value       = var.enable_api_management ? azurerm_api_management.mlops[0].name : null
 }
 
 output "api_management_gateway_url" {
   description = "Gateway URL for API Management"
-  value       = azurerm_api_management.mlops.gateway_url
+  value       = var.enable_api_management ? azurerm_api_management.mlops[0].gateway_url : null
 }
 
 # Front Door
 output "front_door_profile_name" {
   description = "Name of the Azure Front Door profile"
-  value       = azurerm_cdn_frontdoor_profile.mlops.name
+  value       = var.enable_front_door ? azurerm_cdn_frontdoor_profile.mlops[0].name : null
 }
 
 output "front_door_endpoint_hostname" {
   description = "Hostname of the Front Door endpoint"
-  value       = azurerm_cdn_frontdoor_endpoint.mlops.host_name
+  value       = var.enable_front_door ? azurerm_cdn_frontdoor_endpoint.mlops[0].host_name : null
 }
 
 # Service Principal for CI/CD

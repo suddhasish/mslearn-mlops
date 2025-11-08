@@ -207,6 +207,12 @@ variable "enable_cognitive_services" {
 }
 
 # Optional integrations and identities (guard premium/tenant-scoped features for MVP)
+variable "enable_aks_deployment" {
+  description = "Deploy AKS cluster for serving. Disable for minimal cost; enable when you need Kubernetes-based inference."
+  type        = bool
+  default     = false
+}
+
 variable "enable_powerbi" {
   description = "Deploy Power BI Embedded resource."
   type        = bool
@@ -221,6 +227,25 @@ variable "enable_mssql" {
 
 variable "enable_logic_app" {
   description = "Deploy Logic App for cost optimization automation."
+  type        = bool
+  default     = false
+}
+
+# Edge/API routing components
+variable "enable_api_management" {
+  description = "Deploy API Management for model APIs."
+  type        = bool
+  default     = false
+}
+
+variable "enable_front_door" {
+  description = "Deploy Azure Front Door for global routing/WAF."
+  type        = bool
+  default     = false
+}
+
+variable "enable_traffic_manager" {
+  description = "Deploy Traffic Manager for multi-region routing."
   type        = bool
   default     = false
 }

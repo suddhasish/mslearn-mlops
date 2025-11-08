@@ -2,6 +2,7 @@
 # Provides enterprise-grade container orchestration with auto-scaling
 
 resource "azurerm_kubernetes_cluster" "mlops" {
+  count               = var.enable_aks_deployment ? 1 : 0
   name                = "${local.resource_prefix}-aks"
   location            = azurerm_resource_group.mlops.location
   resource_group_name = azurerm_resource_group.mlops.name
@@ -112,8 +113,9 @@ resource "azurerm_kubernetes_cluster" "mlops" {
 
 # Additional Node Pool for GPU workloads
 resource "azurerm_kubernetes_cluster_node_pool" "gpu_pool" {
+  count                 = var.enable_aks_deployment ? 1 : 0
   name                  = "gpupool"
-  kubernetes_cluster_id = azurerm_kubernetes_cluster.mlops.id
+  kubernetes_cluster_id = azurerm_kubernetes_cluster.mlops[0].id
   vm_size               = "Standard_NC6s_v3"
   node_count            = 0
   enable_auto_scaling   = true
@@ -132,19 +134,22 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu_pool" {
 
 # Role assignments for AKS
 resource "azurerm_role_assignment" "aks_acr" {
+  count               = var.enable_aks_deployment ? 1 : 0
   scope                = azurerm_container_registry.mlops.id
   role_definition_name = "AcrPull"
-  principal_id         = azurerm_kubernetes_cluster.mlops.kubelet_identity[0].object_id
+  principal_id         = azurerm_kubernetes_cluster.mlops[0].kubelet_identity[0].object_id
 }
 
 resource "azurerm_role_assignment" "aks_network" {
+  count               = var.enable_aks_deployment ? 1 : 0
   scope                = azurerm_virtual_network.mlops.id
   role_definition_name = "Network Contributor"
-  principal_id         = azurerm_kubernetes_cluster.mlops.identity[0].principal_id
+  principal_id         = azurerm_kubernetes_cluster.mlops[0].identity[0].principal_id
 }
 
 # Azure Front Door for global load balancing and WAF
 resource "azurerm_cdn_frontdoor_profile" "mlops" {
+  count               = var.enable_front_door ? 1 : 0
   name                = "${local.resource_prefix}-fd"
   resource_group_name = azurerm_resource_group.mlops.name
   sku_name            = "Standard_AzureFrontDoor"
@@ -153,14 +158,16 @@ resource "azurerm_cdn_frontdoor_profile" "mlops" {
 }
 
 resource "azurerm_cdn_frontdoor_endpoint" "mlops" {
+  count                   = var.enable_front_door ? 1 : 0
   name                     = "${local.resource_prefix}-fd-endpoint"
-  cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.mlops.id
+  cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.mlops[0].id
 
   tags = local.common_tags
 }
 
 # API Management for ML model APIs
 resource "azurerm_api_management" "mlops" {
+  count               = var.enable_api_management ? 1 : 0
   name                = "${local.resource_prefix}-apim"
   location            = azurerm_resource_group.mlops.location
   resource_group_name = azurerm_resource_group.mlops.name
@@ -186,6 +193,7 @@ resource "azurerm_api_management" "mlops" {
 
 # Traffic Manager for multi-region deployments
 resource "azurerm_traffic_manager_profile" "mlops" {
+  count                 = var.enable_traffic_manager ? 1 : 0
   name                   = "${local.resource_prefix}-tm"
   resource_group_name    = azurerm_resource_group.mlops.name
   traffic_routing_method = "Performance"
