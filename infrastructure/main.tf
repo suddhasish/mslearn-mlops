@@ -69,8 +69,9 @@ locals {
   allowed_subnet_cidr      = var.allowed_subnet_cidr
   enable_private_endpoints = var.enable_private_endpoints
 
-  # Sanitized prefix for resources that require only lowercase letters and numbers (no hyphens)
-  resource_prefix_alnum = lower(regexreplace(local.resource_prefix, "[^a-z0-9]", ""))
+  # Sanitized prefix for resources that require only lowercase letters and numbers
+  # Use simple replacements to avoid dependency on regexreplace (not available in some runner versions)
+  resource_prefix_alnum = lower(replace(replace(local.resource_prefix, "-", ""), "_", ""))
   # Shortened variant to keep room for suffixes within provider limits (e.g., Power BI name <= 64)
   resource_prefix_pbi = substr(local.resource_prefix_alnum, 0, 60)
 }
