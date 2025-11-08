@@ -134,14 +134,14 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu_pool" {
 
 # Role assignments for AKS
 resource "azurerm_role_assignment" "aks_acr" {
-  count               = var.enable_aks_deployment ? 1 : 0
+  count                = var.enable_aks_deployment ? 1 : 0
   scope                = azurerm_container_registry.mlops.id
   role_definition_name = "AcrPull"
   principal_id         = azurerm_kubernetes_cluster.mlops[0].kubelet_identity[0].object_id
 }
 
 resource "azurerm_role_assignment" "aks_network" {
-  count               = var.enable_aks_deployment ? 1 : 0
+  count                = var.enable_aks_deployment ? 1 : 0
   scope                = azurerm_virtual_network.mlops.id
   role_definition_name = "Network Contributor"
   principal_id         = azurerm_kubernetes_cluster.mlops[0].identity[0].principal_id
@@ -158,7 +158,7 @@ resource "azurerm_cdn_frontdoor_profile" "mlops" {
 }
 
 resource "azurerm_cdn_frontdoor_endpoint" "mlops" {
-  count                   = var.enable_front_door ? 1 : 0
+  count                    = var.enable_front_door ? 1 : 0
   name                     = "${local.resource_prefix}-fd-endpoint"
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.mlops[0].id
 
@@ -193,7 +193,7 @@ resource "azurerm_api_management" "mlops" {
 
 # Traffic Manager for multi-region deployments
 resource "azurerm_traffic_manager_profile" "mlops" {
-  count                 = var.enable_traffic_manager ? 1 : 0
+  count                  = var.enable_traffic_manager ? 1 : 0
   name                   = "${local.resource_prefix}-tm"
   resource_group_name    = azurerm_resource_group.mlops.name
   traffic_routing_method = "Performance"
