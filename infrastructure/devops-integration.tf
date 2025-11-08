@@ -17,8 +17,9 @@ resource "azurerm_data_factory" "devops_analytics" {
 
 # Power BI Embedded for business dashboards
 resource "azurerm_powerbi_embedded" "mlops_analytics" {
-  count               = var.enable_devops_integration ? 1 : 0
-  name                = "${local.resource_prefix}-pbi"
+  count = var.enable_devops_integration ? 1 : 0
+  # Name must be 4-64 chars and contain only lowercase letters or numbers
+  name                = "${local.resource_prefix_pbi}pbi"
   location            = azurerm_resource_group.mlops.location
   resource_group_name = azurerm_resource_group.mlops.name
   sku_name            = "A1"

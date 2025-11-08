@@ -187,11 +187,15 @@ QUERY
 }
 
 # Azure Monitor Workbook for ML Operations Dashboard
+resource "random_uuid" "mlops_dashboard" {}
+
 resource "azurerm_application_insights_workbook" "mlops_dashboard" {
-  name                = "${local.resource_prefix}-mlops-dashboard"
+  # Workbook name must be a valid UUID (GUID), use a generated one and set a friendly display_name instead
+  name                = random_uuid.mlops_dashboard.result
   resource_group_name = azurerm_resource_group.mlops.name
   location            = azurerm_resource_group.mlops.location
-  display_name        = "MLOps Operations Dashboard"
+  # Combine human-friendly prefix and purpose while keeping UUID as required name
+  display_name = "${local.resource_prefix}-mlops-dashboard"
 
   data_json = jsonencode({
     version = "Notebook/1.0"
