@@ -172,13 +172,21 @@ jobs:
           budget_alert_threshold  = 80
           
           # DevOps Integration
-          enable_devops_integration = true
+          enable_devops_integration = false
           devops_project_name       = "MLOps Project"
           
           # Services
           enable_data_factory      = true
           enable_synapse          = false
           enable_cognitive_services = false
+          
+          # Feature flags for MVP (disable premium/quota-limited services)
+          enable_powerbi           = false
+          enable_mssql             = false
+          enable_logic_app         = false
+          enable_communication_service = false
+          enable_custom_roles      = false
+          enable_cicd_identity     = false
           
           # Notifications
           notification_email       = "${{ secrets.NOTIFICATION_EMAIL }}"
@@ -190,27 +198,11 @@ jobs:
           cd ${{ env.WORKING_DIR }}
           terraform init
 
-      - name: Import Existing Resource Group (if exists)
+      - name: Import Existing Resources
         run: |
           cd ${{ env.WORKING_DIR }}
-          PROJECT_NAME="${{ secrets.PROJECT_NAME }}"
-          RG_NAME="${PROJECT_NAME}-dev-rg"
-          
-          # Check if resource group exists in Azure
-          if az group show --name "$RG_NAME" &>/dev/null; then
-            echo "Resource group $RG_NAME exists in Azure"
-            
-            # Check if it's already in state
-            if terraform state show azurerm_resource_group.mlops &>/dev/null; then
-              echo "Resource group is already in Terraform state, skipping import"
-            else
-              echo "Importing existing resource group into Terraform state..."
-              RG_ID=$(az group show --name "$RG_NAME" --query id -o tsv)
-              terraform import azurerm_resource_group.mlops "$RG_ID" || echo "Import failed or resource already managed"
-            fi
-          else
-            echo "Resource group does not exist yet, will be created by Terraform"
-          fi
+          chmod +x import-existing-resources.sh
+          ./import-existing-resources.sh "${{ secrets.PROJECT_NAME }}" "dev" "${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}"
         continue-on-error: true
 
       - name: Terraform Plan
@@ -497,27 +489,11 @@ jobs:
           cd ${{ env.WORKING_DIR }}
           terraform init
 
-      - name: Import Existing Resource Group (if exists)
+      - name: Import Existing Resources
         run: |
           cd ${{ env.WORKING_DIR }}
-          PROJECT_NAME="${{ secrets.PROJECT_NAME }}"
-          RG_NAME="${PROJECT_NAME}-prod-rg"
-          
-          # Check if resource group exists in Azure
-          if az group show --name "$RG_NAME" &>/dev/null; then
-            echo "Resource group $RG_NAME exists in Azure"
-            
-            # Check if it's already in state
-            if terraform state show azurerm_resource_group.mlops &>/dev/null; then
-              echo "Resource group is already in Terraform state, skipping import"
-            else
-              echo "Importing existing resource group into Terraform state..."
-              RG_ID=$(az group show --name "$RG_NAME" --query id -o tsv)
-              terraform import azurerm_resource_group.mlops "$RG_ID" || echo "Import failed or resource already managed"
-            fi
-          else
-            echo "Resource group does not exist yet, will be created by Terraform"
-          fi
+          chmod +x import-existing-resources.sh
+          ./import-existing-resources.sh "${{ secrets.PROJECT_NAME }}" "prod" "${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}"
         continue-on-error: true
 
       - name: Terraform Plan
