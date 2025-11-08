@@ -171,10 +171,11 @@ def train_model(reg_rate, X_train, X_test, y_train, y_test, output_dir: str):
     )
 
     try:
-        mlflow.log_metric("accuracy", acc)
-        mlflow.log_metric("precision", prec)
-        mlflow.log_metric("recall", rec)
-        mlflow.log_metric("f1", f1)
+        mlflow.log_metric("accuracy", float(acc))
+        mlflow.log_metric("precision", float(prec))
+        mlflow.log_metric("recall", float(rec))
+        mlflow.log_metric("f1", float(f1))
+        mlflow.log_param("reg_rate", float(reg_rate))
     except Exception as e:
         logger.warning("MLflow logging failed: %s", e)
 

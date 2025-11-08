@@ -2,16 +2,18 @@ name: Scheduled Hyperparameter Tuning (Azure ML)
 
 # Runs on schedule and can be triggered manually
 on:
-  schedule:
-    # run once daily at 02:30 UTC by default (adjust cron as needed)
-    - cron: '41 22 * * *'
-  workflow_dispatch: {}
+  #schedule:
+     #run once daily at 02:30 UTC by default (adjust cron as needed)
+    #- cron: '45 07 * * *'
+  workflow_dispatch:
 
 env:
   # Azure environment (set these in repo secrets or override here)
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_ML_RESOURCE_GROUP }}
   AZURE_WORKSPACE: ${{ secrets.AZURE_ML_WORKSPACE_NAME }}
+  MODEL_NAME: ${{ secrets.MODEL_NAME}}
+  PRIMARY_METRIC : ${{secrets.PRIMARY_METRIC}}
 
   # Path to your sweep job YAML (must exist in repo)
   SWEEP_YAML: src/hyperparameter_sweep.yml
@@ -128,7 +130,7 @@ jobs:
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --workspace-name "$AZURE_WORKSPACE" \
             --subscription "$AZURE_SUBSCRIPTION_ID" \
-            --query "properties.best_trial.id" -o tsv 2>/dev/null || true)
+            --query "properties.best_child_run_id" -o tsv 2>/dev/null || true)
 
           # fallback if the CLI returned empty - inspect whole job json and try alternate path
           if [ -z "$BEST_TRIAL_ID" ]; then
@@ -155,6 +157,7 @@ jobs:
           echo "Downloading model output for best trial: $BEST_TRIAL"
           mkdir -p ${{ env.DOWNLOAD_PATH }}
           az ml job download \
+            --all \
             --name "$BEST_TRIAL" \
             --output-name model \
             --download-path "${{ env.DOWNLOAD_PATH }}" \
@@ -188,8 +191,8 @@ jobs:
           echo "Registering model from: ${{ env.UPLOAD_ARTIFACT_DIR }}"
           python src/register_local.py \
             --model_dir "${{ env.UPLOAD_ARTIFACT_DIR }}" \
-            --model_name "${{ env.MODEL_NAME }}" \
-            --primary_metric "${{ env.PRIMARY_METRIC }}" \
-            --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" \
-            --resource_group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --workspace "${{ env.AZURE_WORKSPACE }}" || (echo "Registration failed" && exit 1)
+            --model_name "$MODEL_NAME" \
+            --primary_metric "$PRIMARY_METRIC" \
+            --subscription_id "$AZURE_SUBSCRIPTION_ID" \
+            --resource_group "$AZURE_RESOURCE_GROUP" \
+            --workspace "$AZURE_WORKSPACE" || (echo "Registration failed" && exit 1)
