@@ -191,6 +191,110 @@ resource "azurerm_api_management" "mlops" {
   tags = local.common_tags
 }
 
+# API Management API for ML Inference
+resource "azurerm_api_management_api" "ml_inference" {
+  count               = var.enable_api_management ? 1 : 0
+  name                = "ml-inference-api"
+  resource_group_name = azurerm_resource_group.mlops.name
+  api_management_name = azurerm_api_management.mlops[0].name
+  revision            = "1"
+  display_name        = "ML Inference API"
+  path                = "inference"
+  protocols           = ["https"]
+  service_url         = var.enable_aks_deployment ? "http://${azurerm_kubernetes_cluster.mlops[0].fqdn}" : ""
+
+  subscription_required = true
+}
+
+# API Management Policy for Rate Limiting and Throttling
+resource "azurerm_api_management_api_policy" "ml_inference_policy" {
+  count               = var.enable_api_management ? 1 : 0
+  api_name            = azurerm_api_management_api.ml_inference[0].name
+  api_management_name = azurerm_api_management.mlops[0].name
+  resource_group_name = azurerm_resource_group.mlops.name
+
+  xml_content = <<XML
+<policies>
+  <inbound>
+    <!-- Rate limiting: 100 requests per minute per IP address -->
+    <rate-limit-by-key calls="100" 
+                       renewal-period="60" 
+                       counter-key="@(context.Request.IpAddress)" />
+    
+    <!-- Quota: 1 million requests per month per subscription key -->
+    <quota-by-key calls="1000000" 
+                  renewal-period="2629800" 
+                  counter-key="@(context.Subscription?.Key ?? "anonymous")" />
+    
+    <!-- Request size limit: 5MB -->
+    <set-body template="none" />
+    <choose>
+      <when condition="@(context.Request.Body.As<string>(preserveContent: true).Length > 5242880)">
+        <return-response>
+          <set-status code="413" reason="Request Entity Too Large" />
+          <set-body>Request body exceeds 5MB limit</set-body>
+        </return-response>
+      </when>
+    </choose>
+    
+    <!-- Add correlation ID for tracing -->
+    <set-header name="X-Correlation-ID" exists-action="skip">
+      <value>@(Guid.NewGuid().ToString())</value>
+    </set-header>
+    
+    <!-- Add timestamp -->
+    <set-header name="X-Request-Time" exists-action="override">
+      <value>@(DateTime.UtcNow.ToString("o"))</value>
+    </set-header>
+    
+    <!-- CORS policy -->
+    <cors allow-credentials="false">
+      <allowed-origins>
+        <origin>*</origin>
+      </allowed-origins>
+      <allowed-methods>
+        <method>POST</method>
+        <method>GET</method>
+        <method>OPTIONS</method>
+      </allowed-methods>
+      <allowed-headers>
+        <header>*</header>
+      </allowed-headers>
+    </cors>
+    
+    <!-- Base URL -->
+    <set-backend-service base-url="@(context.Api.ServiceUrl.ToString())" />
+  </inbound>
+  <backend>
+    <!-- Timeout: 30 seconds -->
+    <forward-request timeout="30" />
+  </backend>
+  <outbound>
+    <!-- Add response headers -->
+    <set-header name="X-Response-Time" exists-action="override">
+      <value>@(DateTime.UtcNow.ToString("o"))</value>
+    </set-header>
+    <set-header name="X-RateLimit-Remaining" exists-action="override">
+      <value>@(context.Response.Headers.GetValueOrDefault("X-Rate-Limit-Remaining","100"))</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <!-- Error handling -->
+    <set-header name="X-Error-Message" exists-action="override">
+      <value>@(context.LastError.Message)</value>
+    </set-header>
+    <set-body>@{
+      return new JObject(
+        new JProperty("error", context.LastError.Message),
+        new JProperty("timestamp", DateTime.UtcNow.ToString("o")),
+        new JProperty("path", context.Request.Url.Path)
+      ).ToString();
+    }</set-body>
+  </on-error>
+</policies>
+XML
+}
+
 # Traffic Manager for multi-region deployments
 resource "azurerm_traffic_manager_profile" "mlops" {
   count                  = var.enable_traffic_manager ? 1 : 0

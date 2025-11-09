@@ -12,6 +12,7 @@ enable_aks_deployment = true
 enable_api_management = true
 enable_front_door     = true
 enable_traffic_manager = true
+enable_redis_cache     = false  # Set to true if you want to test caching (adds ~$15/month)
 
 # Keep premium/tenant scoped extras OFF by default
 enable_powerbi = false

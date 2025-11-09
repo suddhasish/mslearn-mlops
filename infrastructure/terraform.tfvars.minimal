@@ -25,6 +25,7 @@ enable_communication_service = false
 enable_api_management = false
 enable_front_door     = false
 enable_traffic_manager = false
+enable_redis_cache     = false
 
 # CI/CD identity / custom roles (keep off to avoid tenant-scoped work)
 enable_custom_roles = false

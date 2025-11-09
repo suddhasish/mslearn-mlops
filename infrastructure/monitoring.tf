@@ -188,6 +188,153 @@ ContainerLog
 QUERY
 }
 
+resource "azurerm_log_analytics_saved_search" "inference_slo_metrics" {
+  name                       = "InferenceSLOMetrics"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.mlops.id
+  category                   = "MLOps"
+  display_name               = "Inference SLO Metrics (P50/P95/P99)"
+
+  query = <<QUERY
+ContainerLog
+| where LogEntry contains "completed in"
+| extend InferenceTimeMs = todouble(extract("completed in (\\d+\\.\\d+)ms", 1, LogEntry))
+| where isnotnull(InferenceTimeMs)
+| summarize 
+    P50=percentile(InferenceTimeMs, 50),
+    P95=percentile(InferenceTimeMs, 95),
+    P99=percentile(InferenceTimeMs, 99),
+    AvgLatency=avg(InferenceTimeMs),
+    MinLatency=min(InferenceTimeMs),
+    MaxLatency=max(InferenceTimeMs),
+    TotalRequests=count()
+    by bin(TimeGenerated, 5m)
+| order by TimeGenerated desc
+QUERY
+}
+
+# SLO Alert: P95 Latency > 200ms
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "inference_p95_latency" {
+  count               = var.enable_aks_deployment ? 1 : 0
+  name                = "${local.resource_prefix}-inference-p95-latency"
+  resource_group_name = azurerm_resource_group.mlops.name
+  location            = azurerm_resource_group.mlops.location
+  
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT15M"
+  scopes               = [azurerm_log_analytics_workspace.mlops.id]
+  severity             = 2
+  
+  criteria {
+    query = <<QUERY
+ContainerLog
+| where LogEntry contains "completed in"
+| extend InferenceTimeMs = todouble(extract("completed in (\\d+\\.\\d+)ms", 1, LogEntry))
+| where isnotnull(InferenceTimeMs)
+| summarize P95=percentile(InferenceTimeMs, 95) by bin(TimeGenerated, 5m)
+| where P95 > 200
+QUERY
+
+    time_aggregation_method = "Maximum"
+    threshold               = 0
+    operator                = "GreaterThan"
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 2
+      number_of_evaluation_periods             = 2
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.mlops_alerts.id]
+  }
+
+  description = "Alert when P95 inference latency exceeds 200ms (SLO breach)"
+  enabled     = true
+  tags        = local.common_tags
+}
+
+# SLO Alert: P99 Latency > 500ms
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "inference_p99_latency" {
+  count               = var.enable_aks_deployment ? 1 : 0
+  name                = "${local.resource_prefix}-inference-p99-latency"
+  resource_group_name = azurerm_resource_group.mlops.name
+  location            = azurerm_resource_group.mlops.location
+  
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT15M"
+  scopes               = [azurerm_log_analytics_workspace.mlops.id]
+  severity             = 3
+  
+  criteria {
+    query = <<QUERY
+ContainerLog
+| where LogEntry contains "completed in"
+| extend InferenceTimeMs = todouble(extract("completed in (\\d+\\.\\d+)ms", 1, LogEntry))
+| where isnotnull(InferenceTimeMs)
+| summarize P99=percentile(InferenceTimeMs, 99) by bin(TimeGenerated, 5m)
+| where P99 > 500
+QUERY
+
+    time_aggregation_method = "Maximum"
+    threshold               = 0
+    operator                = "GreaterThan"
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 2
+      number_of_evaluation_periods             = 2
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.mlops_alerts.id]
+  }
+
+  description = "Alert when P99 inference latency exceeds 500ms"
+  enabled     = true
+  tags        = local.common_tags
+}
+
+# SLO Alert: Error Rate > 1%
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "inference_error_rate" {
+  count               = var.enable_aks_deployment ? 1 : 0
+  name                = "${local.resource_prefix}-inference-error-rate"
+  resource_group_name = azurerm_resource_group.mlops.name
+  location            = azurerm_resource_group.mlops.location
+  
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT15M"
+  scopes               = [azurerm_log_analytics_workspace.mlops.id]
+  severity             = 1
+  
+  criteria {
+    query = <<QUERY
+ContainerLog
+| where LogEntry contains "Request" and (LogEntry contains "completed" or LogEntry contains "failed")
+| extend IsError = iff(LogEntry contains "failed", 1, 0)
+| summarize ErrorCount=sum(IsError), TotalCount=count() by bin(TimeGenerated, 5m)
+| extend ErrorRate = (ErrorCount * 100.0) / TotalCount
+| where ErrorRate > 1.0
+QUERY
+
+    time_aggregation_method = "Maximum"
+    threshold               = 0
+    operator                = "GreaterThan"
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 2
+      number_of_evaluation_periods             = 2
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.mlops_alerts.id]
+  }
+
+  description = "Alert when inference error rate exceeds 1% (SLO breach)"
+  enabled     = true
+  tags        = local.common_tags
+}
+
 # Azure Monitor Workbook for ML Operations Dashboard
 resource "random_uuid" "mlops_dashboard" {}
 

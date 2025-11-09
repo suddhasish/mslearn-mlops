@@ -250,6 +250,12 @@ variable "enable_traffic_manager" {
   default     = false
 }
 
+variable "enable_redis_cache" {
+  description = "Deploy Azure Cache for Redis for inference response caching and session management."
+  type        = bool
+  default     = false
+}
+
 variable "enable_communication_service" {
   description = "Deploy Azure Communication Service (requires provider registration)."
   type        = bool

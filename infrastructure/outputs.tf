@@ -239,6 +239,22 @@ output "action_group_name" {
   value       = azurerm_monitor_action_group.mlops_alerts.name
 }
 
+# Redis Cache
+output "redis_cache_name" {
+  description = "Name of the Azure Cache for Redis (if enabled)"
+  value       = var.enable_redis_cache ? azurerm_redis_cache.mlops[0].name : null
+}
+
+output "redis_cache_hostname" {
+  description = "Hostname of the Redis cache (if enabled)"
+  value       = var.enable_redis_cache ? azurerm_redis_cache.mlops[0].hostname : null
+}
+
+output "redis_cache_ssl_port" {
+  description = "SSL port for Redis cache connection (if enabled)"
+  value       = var.enable_redis_cache ? azurerm_redis_cache.mlops[0].ssl_port : null
+}
+
 # Cost Management
 output "cost_export_enabled" {
   description = "Whether cost management export is configured"

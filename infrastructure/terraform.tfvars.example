@@ -45,6 +45,20 @@ enable_data_factory      = true
 enable_synapse          = false
 enable_cognitive_services = false
 
+# Optional Services (disable to reduce costs)
+enable_powerbi = false
+enable_mssql   = false
+enable_logic_app = false
+enable_communication_service = false
+enable_custom_roles = false
+enable_cicd_identity = false
+
+# Edge/Serving Components
+enable_api_management = false
+enable_front_door     = false
+enable_traffic_manager = false
+enable_redis_cache     = false  # Enable for inference caching (adds ~$15/month)
+
 # Backup and Recovery
 enable_backup           = true
 backup_retention_days   = 30

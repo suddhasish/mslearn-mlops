@@ -56,6 +56,12 @@ enable_data_factory = false
 # Disable AKS (expensive - use Azure ML compute instead)
 enable_aks_deployment = false
 
+# Disable API Management, Front Door, Traffic Manager (expensive)
+enable_api_management = false
+enable_front_door     = false
+enable_traffic_manager = false
+enable_redis_cache     = false
+
 # ============================================================================
 # Monitoring Configuration (FREE TIER COMPATIBLE)
 # ============================================================================
