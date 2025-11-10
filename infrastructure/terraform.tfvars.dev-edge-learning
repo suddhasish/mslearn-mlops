@@ -1,11 +1,12 @@
 # DEV learning profile: enable AKS + API edge components to understand full-scale inference routing
 # Keep costs controlled with small node counts and public networking.
+# Values marked with VAR_ prefix are replaced from GitHub secrets at runtime
 
 # Core context
-project_name = "mlops-dev-learning"
+project_name = "VAR_PROJECT_NAME"
 environment  = "dev"
-location     = "eastus"
-notification_email = "your-email@example.com"
+location     = "VAR_AZURE_LOCATION"
+notification_email = "VAR_NOTIFICATION_EMAIL"
 
 # Enable serving stack for learning
 enable_aks_deployment = true
@@ -13,6 +14,10 @@ enable_api_management = true
 enable_front_door     = true
 enable_traffic_manager = true
 enable_redis_cache     = false  # Set to true if you want to test caching (adds ~$15/month)
+
+# DevOps Integration - DISABLED IN DEV
+enable_devops_integration = false
+enable_data_factory      = false
 
 # Keep premium/tenant scoped extras OFF by default
 enable_powerbi = false
