@@ -8,8 +8,8 @@ resource "azurerm_redis_cache" "mlops" {
   location            = azurerm_resource_group.mlops.location
   resource_group_name = azurerm_resource_group.mlops.name
   capacity            = 1
-  family              = "C"  # Basic/Standard
-  sku_name            = "Standard"  # Standard for production, Basic for dev
+  family              = "C"        # Basic/Standard
+  sku_name            = "Standard" # Standard for production, Basic for dev
   enable_non_ssl_port = false
   minimum_tls_version = "1.2"
 
@@ -17,7 +17,7 @@ resource "azurerm_redis_cache" "mlops" {
     enable_authentication = true
     maxmemory_reserved    = 2
     maxmemory_delta       = 2
-    maxmemory_policy      = "allkeys-lru"  # Evict least recently used keys when memory full
+    maxmemory_policy      = "allkeys-lru" # Evict least recently used keys when memory full
   }
 
   # Optionally enable Redis persistence for data durability

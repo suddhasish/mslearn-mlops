@@ -178,7 +178,7 @@ resource "azurerm_role_assignment" "ml_workspace_kv_secrets" {
   scope                = azurerm_key_vault.mlops.id
   role_definition_name = "Key Vault Secrets Officer"
   principal_id         = azurerm_machine_learning_workspace.mlops.identity[0].principal_id
-  
+
   skip_service_principal_aad_check = true
 }
 
@@ -186,7 +186,7 @@ resource "azurerm_role_assignment" "ml_workspace_kv_crypto" {
   scope                = azurerm_key_vault.mlops.id
   role_definition_name = "Key Vault Crypto Officer"
   principal_id         = azurerm_machine_learning_workspace.mlops.identity[0].principal_id
-  
+
   skip_service_principal_aad_check = true
 }
 

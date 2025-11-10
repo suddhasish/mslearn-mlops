@@ -33,12 +33,12 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ml_job_failure" {
   name                = "${local.resource_prefix}-ml-job-failure"
   resource_group_name = azurerm_resource_group.mlops.name
   location            = azurerm_resource_group.mlops.location
-  
+
   evaluation_frequency = "PT5M"
   window_duration      = "PT15M"
   scopes               = [azurerm_log_analytics_workspace.mlops.id]
   severity             = 2
-  
+
   criteria {
     query = <<QUERY
 AmlComputeJobEvent
@@ -227,12 +227,12 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "inference_p95_latency
   name                = "${local.resource_prefix}-inference-p95-latency"
   resource_group_name = azurerm_resource_group.mlops.name
   location            = azurerm_resource_group.mlops.location
-  
+
   evaluation_frequency = "PT5M"
   window_duration      = "PT15M"
   scopes               = [azurerm_log_analytics_workspace.mlops.id]
   severity             = 2
-  
+
   criteria {
     query = <<QUERY
 ContainerLog
@@ -268,12 +268,12 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "inference_p99_latency
   name                = "${local.resource_prefix}-inference-p99-latency"
   resource_group_name = azurerm_resource_group.mlops.name
   location            = azurerm_resource_group.mlops.location
-  
+
   evaluation_frequency = "PT5M"
   window_duration      = "PT15M"
   scopes               = [azurerm_log_analytics_workspace.mlops.id]
   severity             = 3
-  
+
   criteria {
     query = <<QUERY
 ContainerLog
@@ -309,12 +309,12 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "inference_error_rate"
   name                = "${local.resource_prefix}-inference-error-rate"
   resource_group_name = azurerm_resource_group.mlops.name
   location            = azurerm_resource_group.mlops.location
-  
+
   evaluation_frequency = "PT5M"
   window_duration      = "PT15M"
   scopes               = [azurerm_log_analytics_workspace.mlops.id]
   severity             = 1
-  
+
   criteria {
     query = <<QUERY
 ContainerLog
