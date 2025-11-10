@@ -3,6 +3,8 @@ import io
 import json
 import logging
 import traceback
+import time
+from datetime import datetime
 
 import numpy as np
 
@@ -16,6 +18,14 @@ except Exception:
 MODEL = None
 MODEL_FILENAME_ENV = "AZUREML_MODEL_FILE"  # optional env var to point to model file
 DEFAULT_MODEL_FILENAME = "model.pkl"       # default name inside the deployment container
+MODEL_VERSION = os.getenv("MODEL_VERSION", "unknown")
+MODEL_NAME = os.getenv("MODEL_NAME", "ml-model")
+DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME", "default")
+
+# Metrics tracking
+INIT_TIME = None
+REQUEST_COUNT = 0
+ERROR_COUNT = 0
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -45,7 +55,10 @@ def init():
     Called once when the deployment container starts.
     Responsible for loading the model into the global MODEL variable.
     """
-    global MODEL
+    global MODEL, INIT_TIME
+    
+    INIT_TIME = time.time()
+    logger.info(f"Initializing model service - Version: {MODEL_VERSION}, Name: {MODEL_NAME}, Deployment: {DEPLOYMENT_NAME}")
 
     try:
         # Determine model file path
@@ -86,10 +99,27 @@ def init():
             )
             logger.error(msg)
             raise FileNotFoundError(msg)
+        
+        init_duration = time.time() - INIT_TIME
+        logger.info(f"Model initialization completed successfully in {init_duration:.2f}s")
 
     except Exception:
         logger.error("Exception in init(): %s", traceback.format_exc())
         raise
+
+
+def _validate_input(data, max_batch_size=100, max_features=1000):
+    """
+    Validate input data to prevent malicious or malformed requests.
+    """
+    if data is None:
+        raise ValueError("Request body is empty or None")
+    
+    # Check if data is too large (basic protection against memory attacks)
+    if isinstance(data, str) and len(data) > 10_000_000:  # 10MB string limit
+        raise ValueError("Request payload too large (>10MB)")
+    
+    return True
 
 
 def _parse_request(data):
@@ -104,6 +134,8 @@ def _parse_request(data):
     Returns a numpy.ndarray.
     """
     try:
+        # Validate input first
+        _validate_input(data)
         # If data is a JSON string, parse it
         if isinstance(data, str):
             data = json.loads(data)
@@ -125,7 +157,13 @@ def _parse_request(data):
 
         # If already list-like or numpy array
         if isinstance(data, (list, tuple, np.ndarray)):
-            return np.array(data)
+            arr = np.array(data)
+            # Validate array dimensions and size
+            if arr.ndim > 2:
+                raise ValueError(f"Input array has too many dimensions: {arr.ndim}. Expected 1D or 2D array.")
+            if arr.size > 100000:  # Max 100k elements
+                raise ValueError(f"Input array too large: {arr.size} elements. Maximum 100,000 allowed.")
+            return arr
 
         raise ValueError("Unsupported payload type: {}".format(type(data)))
 
@@ -168,13 +206,75 @@ def _numpy_encoder(obj):
     return str(obj)
 
 
+def health():
+    """
+    Health check endpoint for readiness and liveness probes.
+    Returns 200 if model is loaded and ready, 503 otherwise.
+    """
+    global MODEL, INIT_TIME, REQUEST_COUNT, ERROR_COUNT
+    
+    try:
+        if MODEL is None:
+            return {
+                "status": "unhealthy",
+                "reason": "Model not loaded",
+                "model_name": MODEL_NAME,
+                "model_version": MODEL_VERSION
+            }, 503
+        
+        uptime_seconds = time.time() - INIT_TIME if INIT_TIME else 0
+        error_rate = (ERROR_COUNT / REQUEST_COUNT * 100) if REQUEST_COUNT > 0 else 0
+        
+        return {
+            "status": "healthy",
+            "model_loaded": True,
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+            "deployment": DEPLOYMENT_NAME,
+            "uptime_seconds": round(uptime_seconds, 2),
+            "total_requests": REQUEST_COUNT,
+            "error_count": ERROR_COUNT,
+            "error_rate_percent": round(error_rate, 2),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }, 200
+    except Exception as e:
+        logger.error(f"Health check failed: {traceback.format_exc()}")
+        return {
+            "status": "unhealthy",
+            "reason": str(e),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }, 503
+
+
+def readiness():
+    """
+    Readiness probe endpoint. Checks if the service can handle requests.
+    """
+    return health()
+
+
+def liveness():
+    """
+    Liveness probe endpoint. Checks if the service is alive.
+    """
+    if MODEL is None:
+        # Service is alive but not ready yet during initialization
+        return {"status": "alive", "ready": False}, 200
+    return {"status": "alive", "ready": True}, 200
+
+
 def run(request_body):
     """
     Entry point for a single prediction request.
     Expects request_body to be a JSON-serializable payload (see _parse_request).
     Returns a JSON-serializable dict, for example: {"predictions": [...]} or {"error": "..."}
     """
-    global MODEL
+    global MODEL, REQUEST_COUNT, ERROR_COUNT
+    
+    start_time = time.time()
+    request_id = f"{int(start_time * 1000)}-{REQUEST_COUNT}"
+    REQUEST_COUNT += 1
+    
     try:
         if MODEL is None:
             raise RuntimeError("Model is not loaded. init() must run before run().")
@@ -222,9 +322,36 @@ def run(request_body):
         # Optionally return input echo for debugging
         if isinstance(request_body, dict) and request_body.get("echo_input"):
             result["input"] = _format_predictions(inputs)
-
+        
+        # Add metadata and metrics
+        inference_duration = time.time() - start_time
+        result["metadata"] = {
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+            "deployment": DEPLOYMENT_NAME,
+            "request_id": request_id,
+            "inference_time_ms": round(inference_duration * 1000, 2),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "num_predictions": len(prediction) if prediction is not None else 0
+        }
+        
+        logger.info(f"Request {request_id} completed in {inference_duration*1000:.2f}ms")
+        
         return result
 
     except Exception as e:
-        logger.error("Exception during run(): %s", traceback.format_exc())
-        return {"error": str(e), "trace": traceback.format_exc()}
+        ERROR_COUNT += 1
+        inference_duration = time.time() - start_time
+        logger.error(f"Request {request_id} failed after {inference_duration*1000:.2f}ms: {traceback.format_exc()}")
+        return {
+            "error": str(e), 
+            "trace": traceback.format_exc(),
+            "metadata": {
+                "model_name": MODEL_NAME,
+                "model_version": MODEL_VERSION,
+                "deployment": DEPLOYMENT_NAME,
+                "request_id": request_id,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "inference_time_ms": round(inference_duration * 1000, 2)
+            }
+        }

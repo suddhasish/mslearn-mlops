@@ -76,6 +76,234 @@ jobs:
           name: terraform-configs
           path: ${{ env.WORKING_DIR }}
 
+  terraform-destroy-dev:
+    name: Destroy - Development
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.destroy == 'true'
+    environment:
+      name: dev-destroy
+      url: https://portal.azure.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
+
+      - name: Create terraform.tfvars
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          
+          LOCATION="${{ secrets.AZURE_LOCATION }}"
+          if [ -z "$LOCATION" ]; then
+            LOCATION="eastus"
+          fi
+          
+          cat > terraform.tfvars << EOF
+          environment                = "dev"
+          project_name              = "${{ secrets.PROJECT_NAME }}"
+          location                  = "$LOCATION"
+          owner                     = "MLOps Team"
+          cost_center               = "ML Engineering"
+          business_unit             = "Data Science"
+          
+          # Network Configuration
+          allowed_subnet_cidr       = "10.0.0.0/8"
+          enable_private_endpoints  = false
+          enable_purge_protection   = false
+          
+          # Compute Configuration
+          ml_compute_name          = "cpu-cluster"
+          aks_node_count          = 2
+          aks_vm_size             = "Standard_D4s_v3"
+          aks_enable_auto_scaling = true
+          aks_min_nodes           = 1
+          aks_max_nodes           = 5
+          
+          # Monitoring
+          enable_container_insights = true
+          log_retention_days       = 30
+          
+          # Security
+          enable_network_policy    = true
+          enable_rbac             = true
+          enable_aad_integration  = true
+          
+          # Cost Management
+          enable_cost_alerts      = true
+          monthly_budget_amount   = 1000
+          budget_alert_threshold  = 80
+          
+          # DevOps Integration
+          enable_devops_integration = false
+          devops_project_name       = "MLOps Project"
+          
+          # Services
+          enable_data_factory      = false
+          enable_synapse          = false
+          enable_cognitive_services = false
+          
+          # Feature flags for MVP (disable premium/quota-limited services)
+          enable_powerbi           = false
+          enable_mssql             = false
+          enable_logic_app         = false
+          enable_communication_service = false
+          enable_custom_roles      = false
+          enable_cicd_identity     = false
+          
+          # Notifications
+          notification_email       = "${{ secrets.NOTIFICATION_EMAIL }}"
+          enable_slack_notifications = false
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform init
+
+      - name: Terraform Destroy
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          echo "⚠️ DESTROYING ALL INFRASTRUCTURE IN DEV ENVIRONMENT..."
+          terraform destroy -auto-approve
+
+      - name: Create Destroy Summary
+        run: |
+          echo "## 🗑️ Infrastructure Destroyed - Development" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All infrastructure resources in the dev environment have been destroyed." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Destroyed by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+
+  terraform-destroy-prod:
+    name: Destroy - Production
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod' && github.event.inputs.destroy == 'true'
+    environment:
+      name: production-destroy
+      url: https://portal.azure.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Setup Terraform Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientId }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ fromJson(secrets.AZURE_CLIENT_SECRET).clientSecret }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
+
+      - name: Create terraform.tfvars
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          
+          LOCATION="${{ secrets.AZURE_LOCATION }}"
+          if [ -z "$LOCATION" ]; then
+            LOCATION="eastus"
+          fi
+          
+          cat > terraform.tfvars << EOF
+          environment                = "prod"
+          project_name              = "${{ secrets.PROJECT_NAME }}"
+          location                  = "$LOCATION"
+          owner                     = "MLOps Team"
+          cost_center               = "ML Engineering"
+          business_unit             = "Data Science"
+          
+          # Network Configuration - PRODUCTION SECURITY
+          allowed_subnet_cidr       = "10.0.0.0/8"
+          enable_private_endpoints  = true
+          enable_purge_protection   = true
+          
+          # Compute Configuration
+          ml_compute_name          = "cpu-cluster"
+          aks_node_count          = 3
+          aks_vm_size             = "Standard_D4s_v3"
+          aks_enable_auto_scaling = true
+          aks_min_nodes           = 2
+          aks_max_nodes           = 10
+          
+          # Monitoring
+          enable_container_insights = true
+          log_retention_days       = 90
+          
+          # Security
+          enable_network_policy    = true
+          enable_rbac             = true
+          enable_aad_integration  = true
+          
+          # Cost Management
+          enable_cost_alerts      = true
+          monthly_budget_amount   = 5000
+          budget_alert_threshold  = 80
+          
+          # DevOps Integration
+          enable_devops_integration = true
+          devops_project_name       = "MLOps Project"
+          
+          # Services
+          enable_data_factory      = true
+          enable_synapse          = false
+          enable_cognitive_services = false
+          
+          # Backup
+          enable_backup           = true
+          backup_retention_days   = 90
+          
+          # Notifications
+          notification_email       = "${{ secrets.NOTIFICATION_EMAIL }}"
+          enable_slack_notifications = false
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          terraform init
+
+      - name: Terraform Destroy
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          echo "⚠️ DESTROYING ALL INFRASTRUCTURE IN PROD ENVIRONMENT..."
+          terraform destroy -auto-approve
+
+      - name: Create Destroy Summary
+        run: |
+          echo "## 🗑️ Infrastructure Destroyed - Production" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ All infrastructure resources in the PRODUCTION environment have been destroyed." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Destroyed by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+
   terraform-plan-dev:
     name: Plan - Development
     needs: terraform-validate
@@ -176,7 +404,7 @@ jobs:
           devops_project_name       = "MLOps Project"
           
           # Services
-          enable_data_factory      = true
+          enable_data_factory      = false
           enable_synapse          = false
           enable_cognitive_services = false
           
@@ -329,6 +557,47 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR }}
           terraform apply -auto-approve tfplan-dev
+
+      - name: Cleanup Unwanted Resources
+        run: |
+          echo "🧹 Cleaning up unintentional resources from previous deployments..."
+          
+          # Get resource group name from Terraform
+          cd ${{ env.WORKING_DIR }}
+          RG_NAME=$(terraform output -raw resource_group_name 2>/dev/null || echo "azureml-dev-rg")
+          SUBSCRIPTION_ID="${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}"
+          
+          echo "Resource Group: $RG_NAME"
+          echo "Subscription: $SUBSCRIPTION_ID"
+          
+          # Function to safely delete resource if it exists
+          delete_resource() {
+            local resource_name=$1
+            local resource_type=$2
+            local resource_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_NAME/providers/$resource_type/$resource_name"
+            
+            if az resource show --ids "$resource_id" &>/dev/null; then
+              echo "🗑️  Deleting $resource_name..."
+              az resource delete --ids "$resource_id" --verbose || echo "⚠️  Failed to delete $resource_name (may not exist or already deleted)"
+            else
+              echo "✅ $resource_name does not exist (already cleaned)"
+            fi
+          }
+          
+          # Delete DevOps Integration resources (should not exist with enable_devops_integration=false)
+          delete_resource "azureml-dev-events" "Microsoft.EventGrid/topics"
+          delete_resource "azureml-dev-eventhub-gsnytv" "Microsoft.EventHub/namespaces"
+          delete_resource "azureml-dev-stream-analytics" "Microsoft.StreamAnalytics/streamingjobs"
+          
+          # Delete Data Factory resources (should not exist with enable_data_factory=false)
+          delete_resource "azureml-dev-df-cost" "Microsoft.DataFactory/factories"
+          delete_resource "azureml-dev-df-devops" "Microsoft.DataFactory/factories"
+          
+          # Delete Managed Identity if it exists from previous CI/CD setup
+          delete_resource "azureml-dev-ml-identity" "Microsoft.ManagedIdentity/userAssignedIdentities"
+          
+          echo "✅ Cleanup completed!"
+        continue-on-error: true
 
       - name: Terraform Output
         id: output
@@ -585,6 +854,47 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR }}
           terraform apply -auto-approve tfplan-prod
+
+      - name: Cleanup Unwanted Resources
+        run: |
+          echo "🧹 Cleaning up unintentional resources from previous deployments..."
+          
+          # Get resource group name from Terraform
+          cd ${{ env.WORKING_DIR }}
+          RG_NAME=$(terraform output -raw resource_group_name 2>/dev/null || echo "azureml-prod-rg")
+          SUBSCRIPTION_ID="${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}"
+          
+          echo "Resource Group: $RG_NAME"
+          echo "Subscription: $SUBSCRIPTION_ID"
+          
+          # Function to safely delete resource if it exists
+          delete_resource() {
+            local resource_name=$1
+            local resource_type=$2
+            local resource_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_NAME/providers/$resource_type/$resource_name"
+            
+            if az resource show --ids "$resource_id" &>/dev/null; then
+              echo "🗑️  Deleting $resource_name..."
+              az resource delete --ids "$resource_id" --verbose || echo "⚠️  Failed to delete $resource_name (may not exist or already deleted)"
+            else
+              echo "✅ $resource_name does not exist (already cleaned)"
+            fi
+          }
+          
+          # Delete DevOps Integration resources (should not exist with enable_devops_integration=false)
+          delete_resource "azureml-prod-events" "Microsoft.EventGrid/topics"
+          delete_resource "azureml-prod-eventhub-*" "Microsoft.EventHub/namespaces"
+          delete_resource "azureml-prod-stream-analytics" "Microsoft.StreamAnalytics/streamingjobs"
+          
+          # Delete Data Factory resources (should not exist with enable_data_factory=false)
+          delete_resource "azureml-prod-df-cost" "Microsoft.DataFactory/factories"
+          delete_resource "azureml-prod-df-devops" "Microsoft.DataFactory/factories"
+          
+          # Delete Managed Identity if it exists from previous CI/CD setup
+          delete_resource "azureml-prod-ml-identity" "Microsoft.ManagedIdentity/userAssignedIdentities"
+          
+          echo "✅ Cleanup completed!"
+        continue-on-error: true
 
       - name: Terraform Output
         id: output
