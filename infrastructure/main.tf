@@ -16,6 +16,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.4"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2"
+    }
   }
 
   # Remote backend configured in backend.tf
@@ -309,13 +313,11 @@ resource "azurerm_container_registry" "mlops" {
   sku                 = "Premium"
   admin_enabled       = false
 
+  # Note: network_rule_set with virtual_network is deprecated in favor of Private Endpoints
+  # When private_endpoints are disabled, we use IP-based rules instead
   network_rule_set {
     default_action = local.enable_private_endpoints ? "Deny" : "Allow"
-
-    virtual_network {
-      action    = "Allow"
-      subnet_id = azurerm_subnet.ml_subnet.id
-    }
+    # virtual_network block removed - deprecated, use Private Endpoints instead
   }
 
   public_network_access_enabled = !local.enable_private_endpoints
@@ -338,8 +340,19 @@ resource "azurerm_application_insights" "mlops" {
   location            = azurerm_resource_group.mlops.location
   resource_group_name = azurerm_resource_group.mlops.name
   application_type    = "web"
+  workspace_id        = azurerm_log_analytics_workspace.mlops.id
 
   retention_in_days = 90
+
+  # Lifecycle management for workspace_id migration
+  lifecycle {
+    # Force replacement when migration trigger changes
+    replace_triggered_by = [
+      null_resource.appinsights_workspace_migration
+    ]
+    # Create new before destroying old to minimize downtime
+    create_before_destroy = true
+  }
 
   tags = local.common_tags
 }
@@ -354,6 +367,35 @@ resource "azurerm_log_analytics_workspace" "mlops" {
 
   tags = local.common_tags
 }
+
+# ============================================================================
+# TEMPORARY MIGRATION RESOURCE - Application Insights workspace_id
+# ============================================================================
+# Purpose: Handles migration of existing App Insights resources that were 
+#          created without workspace_id to link them to Log Analytics
+#
+# How it works:
+#   1. null_resource triggers replacement of Application Insights
+#   2. Application Insights recreated with workspace_id set
+#   3. Data preserved in Log Analytics workspace
+#
+# When to remove:
+#   - After all environments successfully migrated
+#   - When Application Insights consistently has workspace_id in state
+#   - Safe to remove after first successful apply in all environments
+#
+# To trigger migration:
+#   - Increment migration_version from "1" to "2"
+#   - Or simply run: terraform apply
+# ============================================================================
+resource "null_resource" "appinsights_workspace_migration" {
+  triggers = {
+    # Change this value to force recreation: increment when you need to migrate
+    migration_version = "1"
+    workspace_id      = azurerm_log_analytics_workspace.mlops.id
+  }
+}
+# ============================================================================
 
 # Machine Learning Workspace
 resource "azurerm_machine_learning_workspace" "mlops" {

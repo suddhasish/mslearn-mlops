@@ -444,25 +444,11 @@ resource "azurerm_monitor_diagnostic_setting" "storage" {
   target_resource_id         = azurerm_storage_account.mlops.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.mlops.id
 
-  enabled_log {
-    category = "StorageRead"
-  }
-
-  enabled_log {
-    category = "StorageWrite"
-  }
-
-  enabled_log {
-    category = "StorageDelete"
-  }
+  # Note: Storage account logs must be enabled on individual services (blob, file, queue, table)
+  # not on the storage account itself. Only metrics are supported at account level.
 
   metric {
     category = "Transaction"
-    enabled  = true
-  }
-
-  metric {
-    category = "Capacity"
     enabled  = true
   }
 }
