@@ -135,8 +135,8 @@ output "ml_compute_cluster_name" {
 }
 
 output "ml_gpu_compute_cluster_name" {
-  description = "Name of the ML GPU compute cluster"
-  value       = azurerm_machine_learning_compute_cluster.gpu_cluster.name
+  description = "Name of the ML GPU compute cluster (null if not enabled)"
+  value       = var.enable_gpu_compute ? azurerm_machine_learning_compute_cluster.gpu_cluster[0].name : null
 }
 
 # API Management
