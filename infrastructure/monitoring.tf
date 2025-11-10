@@ -27,34 +27,43 @@ resource "azurerm_monitor_action_group" "mlops_alerts" {
 }
 
 # Azure Monitor Alerts for ML Workspace
-resource "azurerm_monitor_metric_alert" "ml_job_failure" {
+# Note: Using log-based alert instead of metric alert because CompletedRuns metric
+# is not consistently available across all regions/workspace configurations
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ml_job_failure" {
   name                = "${local.resource_prefix}-ml-job-failure"
   resource_group_name = azurerm_resource_group.mlops.name
-  scopes              = [azurerm_machine_learning_workspace.mlops.id]
-  description         = "Alert when ML job fails"
-  severity            = 2
-  frequency           = "PT5M"
-  window_size         = "PT15M"
-
+  location            = azurerm_resource_group.mlops.location
+  
+  evaluation_frequency = "PT5M"
+  window_duration      = "PT15M"
+  scopes               = [azurerm_log_analytics_workspace.mlops.id]
+  severity             = 2
+  
   criteria {
-    metric_namespace = "Microsoft.MachineLearningServices/workspaces"
-    metric_name      = "CompletedRuns"
-    aggregation      = "Count"
-    operator         = "GreaterThan"
-    threshold        = 0
+    query = <<QUERY
+AmlComputeJobEvent
+| where EventType == "JobFailed" or EventType == "JobCanceled"
+| summarize Count=count() by bin(TimeGenerated, 5m)
+| where Count > 0
+QUERY
 
-    dimension {
-      name     = "Status"
-      operator = "Include"
-      values   = ["Failed", "Canceled"]
+    time_aggregation_method = "Count"
+    threshold               = 0
+    operator                = "GreaterThan"
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
     }
   }
 
   action {
-    action_group_id = azurerm_monitor_action_group.mlops_alerts.id
+    action_groups = [azurerm_monitor_action_group.mlops_alerts.id]
   }
 
-  tags = local.common_tags
+  description = "Alert when ML jobs fail or are canceled"
+  enabled     = true
+  tags        = local.common_tags
 }
 
 resource "azurerm_monitor_metric_alert" "storage_availability" {

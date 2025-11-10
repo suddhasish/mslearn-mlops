@@ -441,7 +441,10 @@ resource "azurerm_machine_learning_compute_cluster" "cpu_cluster" {
 }
 
 # Machine Learning Compute Cluster for GPU workloads
+# Note: GPU VMs require quota approval. If you don't have GPU quota, this will fail.
+# To request quota: https://docs.microsoft.com/azure/machine-learning/how-to-manage-quotas
 resource "azurerm_machine_learning_compute_cluster" "gpu_cluster" {
+  count                         = var.enable_gpu_compute ? 1 : 0
   name                          = "${var.ml_compute_name}-gpu"
   location                      = azurerm_resource_group.mlops.location
   machine_learning_workspace_id = azurerm_machine_learning_workspace.mlops.id

@@ -21,6 +21,7 @@ enable_logic_app = false
 enable_communication_service = false
 enable_custom_roles = false
 enable_cicd_identity = false
+enable_gpu_compute = false  # Requires GPU quota approval
 
 # Networking: simplify for learning (turn on private later)
 enable_private_endpoints = false

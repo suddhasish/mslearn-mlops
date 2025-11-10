@@ -172,37 +172,57 @@ resource "azurerm_role_assignment" "ml_identity_keyvault" {
 }
 
 # Key Vault Access Policies for ML Workspace System Identity
-resource "azurerm_key_vault_access_policy" "ml_workspace" {
-  key_vault_id = azurerm_key_vault.mlops.id
-  tenant_id    = data.azurerm_client_config.current.tenant_id
-  object_id    = azurerm_machine_learning_workspace.mlops.identity[0].principal_id
-
-  secret_permissions = [
-    "Get",
-    "List",
-    "Set",
-    "Delete",
-    "Recover",
-    "Backup",
-    "Restore"
-  ]
-
-  key_permissions = [
-    "Get",
-    "List",
-    "Create",
-    "Delete",
-    "Update",
-    "Decrypt",
-    "Encrypt",
-    "UnwrapKey",
-    "WrapKey",
-    "Verify",
-    "Sign"
-  ]
+# Note: Using RBAC instead of access policies for RBAC-enabled Key Vault
+# Access policies are deprecated when enable_rbac_authorization = true
+resource "azurerm_role_assignment" "ml_workspace_kv_secrets" {
+  scope                = azurerm_key_vault.mlops.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = azurerm_machine_learning_workspace.mlops.identity[0].principal_id
+  
+  skip_service_principal_aad_check = true
 }
 
-# Key Vault Access Policy for CI/CD Service Principal
+resource "azurerm_role_assignment" "ml_workspace_kv_crypto" {
+  scope                = azurerm_key_vault.mlops.id
+  role_definition_name = "Key Vault Crypto Officer"
+  principal_id         = azurerm_machine_learning_workspace.mlops.identity[0].principal_id
+  
+  skip_service_principal_aad_check = true
+}
+
+# DEPRECATED: Access policy replaced by RBAC roles above
+# Keeping as reference - DO NOT UNCOMMENT
+# resource "azurerm_key_vault_access_policy" "ml_workspace" {
+#   key_vault_id = azurerm_key_vault.mlops.id
+#   tenant_id    = data.azurerm_client_config.current.tenant_id
+#   object_id    = azurerm_machine_learning_workspace.mlops.identity[0].principal_id
+#
+#   secret_permissions = [
+#     "Get",
+#     "List",
+#     "Set",
+#     "Delete",
+#     "Recover",
+#     "Backup",
+#     "Restore"
+#   ]
+#
+#   key_permissions = [
+#     "Get",
+#     "List",
+#     "Create",
+#     "Delete",
+#     "Update",
+#     "Decrypt",
+#     "Encrypt",
+#     "UnwrapKey",
+#     "WrapKey",
+#     "Verify",
+#     "Sign"
+#   ]
+# }
+
+# Key Vault Access Policy for CI/CD Service Principal (still using access policies for external identity)
 resource "azurerm_key_vault_access_policy" "cicd" {
   count        = var.enable_cicd_identity ? 1 : 0
   key_vault_id = azurerm_key_vault.mlops.id

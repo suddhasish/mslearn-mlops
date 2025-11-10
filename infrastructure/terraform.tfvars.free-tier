@@ -50,6 +50,9 @@ enable_synapse = false
 # Disable Cognitive Services (adds cost)
 enable_cognitive_services = false
 
+# Disable GPU compute (requires quota and adds cost)
+enable_gpu_compute = false
+
 # Disable Data Factory (not needed for basic MLOps)
 enable_data_factory = false
 

@@ -206,6 +206,12 @@ variable "enable_cognitive_services" {
   default     = false
 }
 
+variable "enable_gpu_compute" {
+  description = "Enable GPU compute cluster (requires GPU quota approval in subscription)"
+  type        = bool
+  default     = false
+}
+
 # Optional integrations and identities (guard premium/tenant-scoped features for MVP)
 variable "enable_aks_deployment" {
   description = "Deploy AKS cluster for serving. Disable for minimal cost; enable when you need Kubernetes-based inference."

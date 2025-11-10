@@ -44,6 +44,7 @@ devops_project_name       = "MLOps Project"
 enable_data_factory      = true
 enable_synapse          = false
 enable_cognitive_services = false
+enable_gpu_compute       = false  # Requires GPU quota approval
 
 # Optional Services (disable to reduce costs)
 enable_powerbi = false

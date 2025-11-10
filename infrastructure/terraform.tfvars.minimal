@@ -14,6 +14,7 @@ enable_devops_integration = false
 enable_data_factory        = false
 enable_synapse             = false
 enable_cognitive_services  = false
+enable_gpu_compute         = false  # Requires GPU quota
 
 # Optional UI / Analytics (keep off for minimal)
 enable_powerbi = false
