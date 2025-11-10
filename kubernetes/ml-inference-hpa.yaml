@@ -1,0 +1,59 @@
+# Horizontal Pod Autoscaler for ML Inference Deployments
+# This HPA automatically scales inference pods based on CPU and memory utilization
+# to maintain optimal performance and cost efficiency
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ml-inference-hpa
+  namespace: default
+  labels:
+    app: ml-inference
+    component: autoscaling
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ml-inference  # Update this to match your actual deployment name
+  minReplicas: 2  # Minimum 2 for high availability
+  maxReplicas: 10  # Maximum 10 to control costs
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 minutes before scaling down
+      policies:
+      - type: Percent
+        value: 50  # Scale down max 50% of current replicas at a time
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0  # Scale up immediately when needed
+      policies:
+      - type: Percent
+        value: 100  # Double the replicas if needed
+        periodSeconds: 60
+      - type: Pods
+        value: 4  # Or add max 4 pods at a time
+        periodSeconds: 60
+      selectPolicy: Max
+  metrics:
+  # CPU-based scaling
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70  # Scale when average CPU > 70%
+  # Memory-based scaling
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80  # Scale when average memory > 80%
+  # Custom metrics can be added here if using Prometheus/KEDA
+  # - type: Pods
+  #   pods:
+  #     metric:
+  #       name: http_requests_per_second
+  #     target:
+  #       type: AverageValue
+  #       averageValue: "1000"

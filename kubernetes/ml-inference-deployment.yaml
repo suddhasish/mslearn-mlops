@@ -1,0 +1,148 @@
+# Sample Kubernetes Deployment for ML Inference
+# This deployment works with the HPA configuration and includes health probes
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-inference
+  labels:
+    app: ml-inference
+    component: serving
+spec:
+  replicas: 2  # Initial replicas - HPA will manage this
+  selector:
+    matchLabels:
+      app: ml-inference
+  template:
+    metadata:
+      labels:
+        app: ml-inference
+        component: serving
+    spec:
+      containers:
+      - name: inference
+        image: <your-acr>.azurecr.io/ml-inference:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5001
+          name: http
+          protocol: TCP
+        
+        env:
+        # Model metadata
+        - name: MODEL_VERSION
+          value: "v1.0.0"
+        - name: MODEL_NAME
+          value: "diabetes-classifier"
+        - name: DEPLOYMENT_NAME
+          value: "production"
+        
+        # Redis configuration (if enabled)
+        - name: REDIS_HOST
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: host
+              optional: true
+        - name: REDIS_PORT
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: port
+              optional: true
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: password
+              optional: true
+        
+        # Model file location
+        - name: AZUREML_MODEL_FILE
+          value: "/app/model/model.pkl"
+        
+        resources:
+          requests:
+            cpu: "500m"      # 0.5 CPU cores
+            memory: "1Gi"     # 1GB RAM
+          limits:
+            cpu: "2000m"      # 2 CPU cores max
+            memory: "4Gi"     # 4GB RAM max
+        
+        # Liveness probe - checks if container is alive
+        livenessProbe:
+          httpGet:
+            path: /liveness
+            port: 5001
+            scheme: HTTP
+          initialDelaySeconds: 30  # Wait 30s for model loading
+          periodSeconds: 10        # Check every 10s
+          timeoutSeconds: 5        # 5s timeout
+          successThreshold: 1
+          failureThreshold: 3      # Restart after 3 failures
+        
+        # Readiness probe - checks if container can serve traffic
+        readinessProbe:
+          httpGet:
+            path: /readiness
+            port: 5001
+            scheme: HTTP
+          initialDelaySeconds: 10  # Check after 10s
+          periodSeconds: 5         # Check every 5s
+          timeoutSeconds: 3        # 3s timeout
+          successThreshold: 1
+          failureThreshold: 2      # Remove from load balancer after 2 failures
+        
+        volumeMounts:
+        - name: model-volume
+          mountPath: /app/model
+          readOnly: true
+      
+      volumes:
+      - name: model-volume
+        # Mount model from Azure ML workspace or blob storage
+        emptyDir: {}  # Replace with actual volume source
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-inference
+  labels:
+    app: ml-inference
+spec:
+  type: LoadBalancer  # Or ClusterIP if using Ingress
+  ports:
+  - port: 80
+    targetPort: 5001
+    protocol: TCP
+    name: http
+  selector:
+    app: ml-inference
+
+---
+# Optional: Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ml-inference-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  rules:
+  - host: inference.example.com  # Replace with your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ml-inference
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - inference.example.com
+    secretName: inference-tls-secret
