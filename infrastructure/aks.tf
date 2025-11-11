@@ -7,7 +7,7 @@ resource "azurerm_kubernetes_cluster" "mlops" {
   location            = azurerm_resource_group.mlops.location
   resource_group_name = azurerm_resource_group.mlops.name
   dns_prefix          = "${local.resource_prefix}-aks"
-  kubernetes_version  = "1.28"
+  kubernetes_version  = "1.29"  # Using supported non-LTS version
 
   private_cluster_enabled = local.enable_private_endpoints
 

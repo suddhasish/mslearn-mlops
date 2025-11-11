@@ -240,12 +240,12 @@ ContainerLog
 | extend InferenceTimeMs = todouble(extract("completed in (\\d+\\.\\d+)ms", 1, LogEntry))
 | where isnotnull(InferenceTimeMs)
 | summarize P95=percentile(InferenceTimeMs, 95) by bin(TimeGenerated, 5m)
-| where P95 > 200
 QUERY
 
     time_aggregation_method = "Maximum"
-    threshold               = 0
+    threshold               = 200
     operator                = "GreaterThan"
+    metric_measure_column   = "P95"
 
     failing_periods {
       minimum_failing_periods_to_trigger_alert = 2
@@ -281,12 +281,12 @@ ContainerLog
 | extend InferenceTimeMs = todouble(extract("completed in (\\d+\\.\\d+)ms", 1, LogEntry))
 | where isnotnull(InferenceTimeMs)
 | summarize P99=percentile(InferenceTimeMs, 99) by bin(TimeGenerated, 5m)
-| where P99 > 500
 QUERY
 
     time_aggregation_method = "Maximum"
-    threshold               = 0
+    threshold               = 500
     operator                = "GreaterThan"
+    metric_measure_column   = "P99"
 
     failing_periods {
       minimum_failing_periods_to_trigger_alert = 2
@@ -322,12 +322,12 @@ ContainerLog
 | extend IsError = iff(LogEntry contains "failed", 1, 0)
 | summarize ErrorCount=sum(IsError), TotalCount=count() by bin(TimeGenerated, 5m)
 | extend ErrorRate = (ErrorCount * 100.0) / TotalCount
-| where ErrorRate > 1.0
 QUERY
 
     time_aggregation_method = "Maximum"
-    threshold               = 0
+    threshold               = 1.0
     operator                = "GreaterThan"
+    metric_measure_column   = "ErrorRate"
 
     failing_periods {
       minimum_failing_periods_to_trigger_alert = 2
