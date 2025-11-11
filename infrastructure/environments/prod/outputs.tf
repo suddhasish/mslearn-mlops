@@ -71,9 +71,9 @@ output "key_vault_name" {
   value       = module.ml_workspace.key_vault_name
 }
 
-output "key_vault_uri" {
-  description = "URI of the Key Vault"
-  value       = module.ml_workspace.key_vault_uri
+output "key_vault_id" {
+  description = "ID of the Key Vault"
+  value       = module.ml_workspace.key_vault_id
 }
 
 output "application_insights_name" {
@@ -109,19 +109,19 @@ output "aks_cluster_fqdn" {
 # RBAC OUTPUTS
 # ============================================================================
 
-output "ml_user_managed_identity_principal_id" {
+output "ml_identity_principal_id" {
   description = "Principal ID of ML user managed identity"
-  value       = module.rbac.ml_user_managed_identity_principal_id
+  value       = module.rbac.ml_identity_principal_id
 }
 
-output "ml_user_managed_identity_client_id" {
+output "ml_identity_client_id" {
   description = "Client ID of ML user managed identity"
-  value       = module.rbac.ml_user_managed_identity_client_id
+  value       = module.rbac.ml_identity_client_id
 }
 
-output "cicd_service_principal_id" {
+output "cicd_sp_object_id" {
   description = "Object ID of CI/CD service principal"
-  value       = var.enable_cicd_identity ? module.rbac.cicd_service_principal_id : null
+  value       = var.enable_cicd_identity ? module.rbac.cicd_sp_object_id : null
 }
 
 # ============================================================================
