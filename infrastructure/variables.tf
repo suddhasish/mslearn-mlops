@@ -262,6 +262,24 @@ variable "enable_redis_cache" {
   default     = false
 }
 
+variable "redis_cache_capacity" {
+  description = "Redis cache capacity (0-6 for Standard, 1-4 for Premium)"
+  type        = number
+  default     = 1
+}
+
+variable "redis_cache_family" {
+  description = "Redis cache family (C for Standard, P for Premium)"
+  type        = string
+  default     = "C"
+}
+
+variable "redis_cache_sku_name" {
+  description = "Redis cache SKU (Basic, Standard, Premium)"
+  type        = string
+  default     = "Standard"
+}
+
 variable "enable_communication_service" {
   description = "Deploy Azure Communication Service (requires provider registration)."
   type        = bool
@@ -311,4 +329,11 @@ variable "slack_webhook_url" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+# Tags
+variable "tags" {
+  description = "Additional tags to apply to all resources"
+  type        = map(string)
+  default     = {}
 }

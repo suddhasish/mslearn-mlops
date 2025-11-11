@@ -39,7 +39,8 @@ permissions:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  WORKING_DIR: './infrastructure'
+  WORKING_DIR_DEV: './infrastructure/environments/dev'
+  WORKING_DIR_PROD: './infrastructure/environments/prod'
 
 jobs:
   terraform-validate:
@@ -56,25 +57,35 @@ jobs:
 
       - name: Terraform Format Check
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ./infrastructure
           terraform fmt -check -recursive
         continue-on-error: true
 
-      - name: Terraform Init (no backend)
+      - name: Terraform Init Dev (no backend)
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           terraform init -backend=false
 
-      - name: Terraform Validate
+      - name: Terraform Validate Dev
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
+          terraform validate
+
+      - name: Terraform Init Prod (no backend)
+        run: |
+          cd ${{ env.WORKING_DIR_PROD }}
+          terraform init -backend=false
+
+      - name: Terraform Validate Prod
+        run: |
+          cd ${{ env.WORKING_DIR_PROD }}
           terraform validate
 
       - name: Upload Terraform configs
         uses: actions/upload-artifact@v4
         with:
           name: terraform-configs
-          path: ${{ env.WORKING_DIR }}
+          path: ./infrastructure/environments
 
   terraform-destroy-dev:
     name: Destroy - Development
@@ -106,12 +117,9 @@ jobs:
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
 
-      - name: Prepare terraform.tfvars from version-controlled file
+      - name: Prepare terraform.tfvars with secrets
         run: |
-          cd ${{ env.WORKING_DIR }}
-          
-          # Use dev-edge-learning profile
-          cp terraform.tfvars.dev-edge-learning terraform.tfvars
+          cd ${{ env.WORKING_DIR_DEV }}
           
           # Replace secret placeholders with actual values
           LOCATION="${{ secrets.AZURE_LOCATION }}"
@@ -123,16 +131,16 @@ jobs:
           sed -i "s/VAR_AZURE_LOCATION/$LOCATION/g" terraform.tfvars
           sed -i "s/VAR_NOTIFICATION_EMAIL/${{ secrets.NOTIFICATION_EMAIL }}/g" terraform.tfvars
           
-          echo "✅ Using terraform.tfvars.dev-edge-learning with secrets injected"
+          echo "✅ Using environments/dev/terraform.tfvars with secrets injected"
 
       - name: Terraform Init
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           terraform init
 
       - name: Terraform Destroy
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           echo "⚠️ DESTROYING ALL INFRASTRUCTURE IN DEV ENVIRONMENT..."
           terraform destroy -auto-approve
 
@@ -175,12 +183,9 @@ jobs:
           echo "ARM_SUBSCRIPTION_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ fromJson(secrets.AZURE_CLIENT_SECRET).tenantId }}" >> $GITHUB_ENV
 
-      - name: Prepare terraform.tfvars from version-controlled file
+      - name: Prepare terraform.tfvars with secrets
         run: |
-          cd ${{ env.WORKING_DIR }}
-          
-          # Use production profile
-          cp terraform.tfvars.prod terraform.tfvars
+          cd ${{ env.WORKING_DIR_PROD }}
           
           # Replace secret placeholders with actual values
           LOCATION="${{ secrets.AZURE_LOCATION }}"
@@ -192,16 +197,16 @@ jobs:
           sed -i "s/VAR_AZURE_LOCATION/$LOCATION/g" terraform.tfvars
           sed -i "s/VAR_NOTIFICATION_EMAIL/${{ secrets.NOTIFICATION_EMAIL }}/g" terraform.tfvars
           
-          echo "✅ Using terraform.tfvars.prod with secrets injected"
+          echo "✅ Using environments/prod/terraform.tfvars with secrets injected"
 
       - name: Terraform Init
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           terraform init
 
       - name: Terraform Destroy
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           echo "⚠️ DESTROYING ALL INFRASTRUCTURE IN PROD ENVIRONMENT..."
           terraform destroy -auto-approve
 
@@ -261,16 +266,13 @@ jobs:
 
       - name: Verify Terraform Backend
         run: |
-          cd ${{ env.WORKING_DIR }}
-          echo "Using backend configuration from backend.tf"
-          cat backend.tf
+          cd ${{ env.WORKING_DIR_DEV }}
+          echo "Using backend configuration from main.tf"
+          grep -A 7 'backend "azurerm"' main.tf || echo "Backend configuration embedded in main.tf"
 
-      - name: Prepare terraform.tfvars from version-controlled file
+      - name: Prepare terraform.tfvars with secrets
         run: |
-          cd ${{ env.WORKING_DIR }}
-          
-          # Use dev-edge-learning profile
-          cp terraform.tfvars.dev-edge-learning terraform.tfvars
+          cd ${{ env.WORKING_DIR_DEV }}
           
           # Replace secret placeholders with actual values
           LOCATION="${{ secrets.AZURE_LOCATION }}"
@@ -282,17 +284,17 @@ jobs:
           sed -i "s/VAR_AZURE_LOCATION/$LOCATION/g" terraform.tfvars
           sed -i "s/VAR_NOTIFICATION_EMAIL/${{ secrets.NOTIFICATION_EMAIL }}/g" terraform.tfvars
           
-          echo "✅ Using terraform.tfvars.dev-edge-learning with secrets injected"
-          cat terraform.tfvars
+          echo "✅ Using environments/dev/terraform.tfvars (modular infrastructure)"
+          echo "📦 Modules: networking, storage, ml-workspace, aks, rbac, cost-management"
 
       - name: Terraform Init
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           terraform init
 
       - name: Force Unlock State (if locked)
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           echo "🔓 Checking for state lock..."
           
           # List any existing locks
@@ -316,7 +318,7 @@ jobs:
 
       - name: Import Existing Resources
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ./infrastructure
           chmod +x import-existing-resources.sh
           ./import-existing-resources.sh "${{ secrets.PROJECT_NAME }}" "dev" "${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}"
         continue-on-error: true
@@ -324,7 +326,7 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           set -o pipefail
           echo "Running terraform plan (dev)..."
           terraform plan -out=tfplan-dev -no-color | tee tfplan-dev.txt
@@ -336,7 +338,7 @@ jobs:
 
       - name: Summarize Dev Plan
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           echo "### Terraform Plan (Dev) Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -374,9 +376,9 @@ jobs:
         with:
           name: tfplan-dev
           path: |
-            ${{ env.WORKING_DIR }}/tfplan-dev
-            ${{ env.WORKING_DIR }}/tfplan-dev.txt
-            ${{ env.WORKING_DIR }}/tfplan-dev.json
+            ${{ env.WORKING_DIR_DEV }}/tfplan-dev
+            ${{ env.WORKING_DIR_DEV }}/tfplan-dev.txt
+            ${{ env.WORKING_DIR_DEV }}/tfplan-dev.json
 
   terraform-apply-dev:
     name: Deploy - Development
@@ -428,22 +430,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tfplan-dev
-          path: ${{ env.WORKING_DIR }}
+          path: ${{ env.WORKING_DIR_DEV }}
 
       - name: Verify Terraform Backend
         run: |
-          cd ${{ env.WORKING_DIR }}
-          echo "Using backend configuration from backend.tf"
-          cat backend.tf
+          cd ${{ env.WORKING_DIR_DEV }}
+          echo "Using backend configuration from main.tf"
+          grep -A 7 'backend "azurerm"' main.tf || echo "Backend configuration embedded in main.tf"
 
       - name: Terraform Init
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           terraform init
 
       - name: Force Unlock State (if locked)
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           echo "🔓 Checking for state lock before apply..."
           
           # Try to detect and unlock if needed
@@ -459,13 +461,13 @@ jobs:
 
       - name: Terraform Apply
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           terraform apply -auto-approve tfplan-dev
 
       - name: Terraform Output
         id: output
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           terraform output -json > outputs-dev.json
           cat outputs-dev.json
 
@@ -473,7 +475,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-outputs-dev
-          path: ${{ env.WORKING_DIR }}/outputs-dev.json
+          path: ${{ env.WORKING_DIR_DEV }}/outputs-dev.json
 
       - name: Configure Azure ML Workspace
         run: |
@@ -481,7 +483,7 @@ jobs:
           az extension add -n ml --upgrade -y
           
           # Get workspace details from Terraform outputs
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           WORKSPACE_NAME=$(jq -r '.ml_workspace_name.value' outputs-dev.json)
           RESOURCE_GROUP=$(jq -r '.resource_group_name.value' outputs-dev.json)
           SUBSCRIPTION_ID=$(jq -r '.deployment_summary.value.subscription_id' outputs-dev.json 2>/dev/null || az account show --query id -o tsv)
@@ -497,7 +499,7 @@ jobs:
 
       - name: Create Deployment Summary
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_DEV }}
           
           echo "## 🚀 Infrastructure Deployment - Development" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -549,16 +551,13 @@ jobs:
 
       - name: Verify Terraform Backend
         run: |
-          cd ${{ env.WORKING_DIR }}
-          echo "Using backend configuration from backend.tf"
-          cat backend.tf
+          cd ${{ env.WORKING_DIR_PROD }}
+          echo "Using backend configuration from main.tf"
+          grep -A 7 'backend "azurerm"' main.tf || echo "Backend configuration embedded in main.tf"
 
-      - name: Prepare terraform.tfvars from version-controlled file
+      - name: Prepare terraform.tfvars with secrets
         run: |
-          cd ${{ env.WORKING_DIR }}
-          
-          # Use production profile
-          cp terraform.tfvars.prod terraform.tfvars
+          cd ${{ env.WORKING_DIR_PROD }}
           
           # Replace secret placeholders with actual values
           LOCATION="${{ secrets.AZURE_LOCATION }}"
@@ -570,17 +569,17 @@ jobs:
           sed -i "s/VAR_AZURE_LOCATION/$LOCATION/g" terraform.tfvars
           sed -i "s/VAR_NOTIFICATION_EMAIL/${{ secrets.NOTIFICATION_EMAIL }}/g" terraform.tfvars
           
-          echo "✅ Using terraform.tfvars.prod with secrets injected"
+          echo "✅ Using environments/prod/terraform.tfvars with secrets injected"
           cat terraform.tfvars
 
       - name: Terraform Init
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           terraform init
 
       - name: Force Unlock State (if locked)
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           echo "🔓 Checking for state lock..."
           
           LOCK_ID=$(terraform plan -lock-timeout=1s 2>&1 | grep -oP 'ID:\s+\K[a-f0-9-]+' | head -1)
@@ -595,7 +594,7 @@ jobs:
 
       - name: Import Existing Resources
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ./infrastructure
           chmod +x import-existing-resources.sh
           ./import-existing-resources.sh "${{ secrets.PROJECT_NAME }}" "prod" "${{ fromJson(secrets.AZURE_CLIENT_SECRET).subscriptionId }}"
         continue-on-error: true
@@ -606,7 +605,7 @@ jobs:
         #   SLACK_NOTIFY: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
         #   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           set -o pipefail
           echo "Running terraform plan (prod)..."
           terraform plan -out=tfplan-prod -no-color | tee tfplan-prod.txt
@@ -618,7 +617,7 @@ jobs:
 
       - name: Summarize Prod Plan
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           echo "### Terraform Plan (Prod) Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -632,9 +631,9 @@ jobs:
         with:
           name: tfplan-prod
           path: |
-            ${{ env.WORKING_DIR }}/tfplan-prod
-            ${{ env.WORKING_DIR }}/tfplan-prod.txt
-            ${{ env.WORKING_DIR }}/tfplan-prod.json
+            ${{ env.WORKING_DIR_PROD }}/tfplan-prod
+            ${{ env.WORKING_DIR_PROD }}/tfplan-prod.txt
+            ${{ env.WORKING_DIR_PROD }}/tfplan-prod.json
 
   terraform-apply-prod:
     name: Deploy - Production
@@ -672,22 +671,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tfplan-prod
-          path: ${{ env.WORKING_DIR }}
+          path: ${{ env.WORKING_DIR_PROD }}
 
       - name: Verify Terraform Backend
         run: |
-          cd ${{ env.WORKING_DIR }}
-          echo "Using backend configuration from backend.tf"
-          cat backend.tf
+          cd ${{ env.WORKING_DIR_PROD }}
+          echo "Using backend configuration from main.tf"
+          grep -A 7 'backend "azurerm"' main.tf || echo "Backend configuration embedded in main.tf"
 
       - name: Terraform Init
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           terraform init
 
       - name: Force Unlock State (if locked)
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           echo "🔓 Checking for state lock before apply..."
           
           LOCK_ID=$(terraform plan -lock-timeout=1s 2>&1 | grep -oP 'ID:\s+\K[a-f0-9-]+' | head -1)
@@ -702,13 +701,13 @@ jobs:
 
       - name: Terraform Apply
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           terraform apply -auto-approve tfplan-prod
 
       - name: Terraform Output
         id: output
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           terraform output -json > outputs-prod.json
           cat outputs-prod.json
 
@@ -716,7 +715,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-outputs-prod
-          path: ${{ env.WORKING_DIR }}/outputs-prod.json
+          path: ${{ env.WORKING_DIR_PROD }}/outputs-prod.json
 
       # Slack notification - Uncomment when SLACK_WEBHOOK_URL secret is configured
       # - name: Send Slack Notification
@@ -755,7 +754,7 @@ jobs:
 
       - name: Create Deployment Summary
         run: |
-          cd ${{ env.WORKING_DIR }}
+          cd ${{ env.WORKING_DIR_PROD }}
           
           echo "## 🚀 Infrastructure Deployment - Production" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
