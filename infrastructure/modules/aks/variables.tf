@@ -98,6 +98,12 @@ variable "enable_container_insights" {
   default     = true
 }
 
+variable "enable_gpu_node_pool" {
+  description = "Enable GPU node pool (requires GPU quota)"
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

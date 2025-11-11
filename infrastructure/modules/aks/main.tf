@@ -93,9 +93,9 @@ resource "azurerm_kubernetes_cluster" "aks" {
   tags = var.tags
 }
 
-# GPU Node Pool
+# GPU Node Pool (Optional - requires GPU quota)
 resource "azurerm_kubernetes_cluster_node_pool" "gpu_pool" {
-  count                 = var.enable_aks_deployment ? 1 : 0
+  count                 = var.enable_aks_deployment && var.enable_gpu_node_pool ? 1 : 0
   name                  = "gpupool"
   kubernetes_cluster_id = azurerm_kubernetes_cluster.aks[0].id
   vm_size               = "Standard_NC6s_v3"

@@ -144,6 +144,7 @@ module "aks" {
   enable_network_policy      = var.enable_network_policy
   enable_rbac                = var.enable_rbac
   enable_container_insights  = var.enable_container_insights
+  enable_gpu_node_pool       = false  # Disabled for dev (no GPU quota)
   tags                       = local.common_tags
 }
 
