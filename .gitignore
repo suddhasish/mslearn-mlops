@@ -135,6 +135,7 @@ dmypy.json
 *.tfvars
 !*.tfvars.example
 !terraform.tfvars.free-tier
+!infrastructure/environments/*/terraform.tfvars
 crash.log
 crash.*.log
 override.tf
