@@ -61,6 +61,12 @@ variable "enable_cicd_identity" {
   default     = false
 }
 
+variable "enable_aks_deployment" {
+  description = "Whether AKS is deployed (controls AKS-related RBAC)"
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

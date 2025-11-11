@@ -136,9 +136,9 @@ resource "azurerm_role_assignment" "ml_keyvault" {
   principal_id         = azurerm_user_assigned_identity.ml_workspace.principal_id
 }
 
-# Grant AKS cluster access to ACR (if AKS is enabled)
+# Grant AKS access to ACR
 resource "azurerm_role_assignment" "aks_acr" {
-  count                = var.aks_cluster_id != "" ? 1 : 0
+  count                = var.enable_aks_deployment ? 1 : 0
   scope                = var.container_registry_id
   role_definition_name = "AcrPull"
   principal_id         = data.azurerm_kubernetes_cluster.aks[0].kubelet_identity[0].object_id
@@ -146,7 +146,7 @@ resource "azurerm_role_assignment" "aks_acr" {
 
 # Data source for AKS cluster (if needed)
 data "azurerm_kubernetes_cluster" "aks" {
-  count               = var.aks_cluster_id != "" ? 1 : 0
+  count               = var.enable_aks_deployment ? 1 : 0
   name                = split("/", var.aks_cluster_id)[8]
   resource_group_name = basename(var.resource_group_id)
 }

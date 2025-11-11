@@ -165,6 +165,7 @@ module "rbac" {
   tenant_id               = data.azurerm_client_config.current.tenant_id
   subscription_id         = data.azurerm_client_config.current.subscription_id
   client_config_object_id = data.azurerm_client_config.current.object_id
+  enable_aks_deployment   = var.enable_aks_deployment
   enable_custom_roles     = var.enable_custom_roles
   enable_cicd_identity    = var.enable_cicd_identity
   tags                    = local.common_tags
