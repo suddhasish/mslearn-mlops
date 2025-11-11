@@ -81,16 +81,16 @@ resource "azuread_application" "mlops_cicd" {
 
 # Service Principal for CI/CD
 resource "azuread_service_principal" "mlops_cicd" {
-  count          = var.enable_cicd_identity ? 1 : 0
-  client_id      = azuread_application.mlops_cicd[0].client_id
-  use_existing   = true
+  count        = var.enable_cicd_identity ? 1 : 0
+  client_id    = azuread_application.mlops_cicd[0].client_id
+  use_existing = true
 }
 
 # Service Principal Password
 resource "azuread_application_password" "mlops_cicd" {
-  count                 = var.enable_cicd_identity ? 1 : 0
-  application_id        = azuread_application.mlops_cicd[0].id
-  end_date_relative     = "8760h" # 1 year
+  count             = var.enable_cicd_identity ? 1 : 0
+  application_id    = azuread_application.mlops_cicd[0].id
+  end_date_relative = "8760h" # 1 year
 }
 
 # User-assigned identity for ML Workspace

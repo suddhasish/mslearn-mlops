@@ -58,15 +58,15 @@ output "application_insights_name" {
 output "deployment_summary" {
   description = "DEV environment deployment summary"
   value = {
-    environment          = "dev"
-    resource_group       = azurerm_resource_group.mlops.name
-    ml_workspace         = module.ml_workspace.workspace_name
-    aks_cluster          = module.aks.cluster_name
-    storage_account      = module.storage.storage_account_name
-    container_registry   = module.storage.container_registry_name
-    key_vault            = module.ml_workspace.key_vault_name
-    location             = azurerm_resource_group.mlops.location
-    cost_management      = var.enable_cost_alerts ? "Enabled" : "Disabled"
-    monthly_budget       = var.monthly_budget_amount
+    environment        = "dev"
+    resource_group     = azurerm_resource_group.mlops.name
+    ml_workspace       = module.ml_workspace.workspace_name
+    aks_cluster        = module.aks.cluster_name
+    storage_account    = module.storage.storage_account_name
+    container_registry = module.storage.container_registry_name
+    key_vault          = module.ml_workspace.key_vault_name
+    location           = azurerm_resource_group.mlops.location
+    cost_management    = var.enable_cost_alerts ? "Enabled" : "Disabled"
+    monthly_budget     = var.monthly_budget_amount
   }
 }

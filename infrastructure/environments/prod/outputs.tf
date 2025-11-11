@@ -173,17 +173,17 @@ output "monthly_budget_name" {
 output "deployment_summary" {
   description = "Summary of deployed resources and configuration"
   value = {
-    environment              = "prod"
-    resource_group           = azurerm_resource_group.mlops.name
-    location                 = azurerm_resource_group.mlops.location
-    ml_workspace             = module.ml_workspace.workspace_name
-    aks_cluster              = var.enable_aks_deployment ? module.aks.cluster_name : "Disabled"
+    environment               = "prod"
+    resource_group            = azurerm_resource_group.mlops.name
+    location                  = azurerm_resource_group.mlops.location
+    ml_workspace              = module.ml_workspace.workspace_name
+    aks_cluster               = var.enable_aks_deployment ? module.aks.cluster_name : "Disabled"
     private_endpoints_enabled = var.enable_private_endpoints
-    redis_cache_enabled      = var.enable_redis_cache
-    custom_roles_enabled     = var.enable_custom_roles
-    cicd_identity_enabled    = var.enable_cicd_identity
-    cost_alerts_enabled      = var.enable_cost_alerts
-    monthly_budget           = var.monthly_budget_amount
-    purge_protection_enabled = var.enable_purge_protection
+    redis_cache_enabled       = var.enable_redis_cache
+    custom_roles_enabled      = var.enable_custom_roles
+    cicd_identity_enabled     = var.enable_cicd_identity
+    cost_alerts_enabled       = var.enable_cost_alerts
+    monthly_budget            = var.monthly_budget_amount
+    purge_protection_enabled  = var.enable_purge_protection
   }
 }

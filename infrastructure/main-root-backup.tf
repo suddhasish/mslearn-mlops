@@ -83,11 +83,11 @@ resource "azurerm_resource_group" "mlops" {
 module "networking" {
   source = "./modules/networking"
 
-  resource_prefix      = local.resource_prefix
-  location             = azurerm_resource_group.mlops.location
-  resource_group_name  = azurerm_resource_group.mlops.name
-  allowed_subnet_cidr  = var.allowed_subnet_cidr
-  tags                 = local.common_tags
+  resource_prefix     = local.resource_prefix
+  location            = azurerm_resource_group.mlops.location
+  resource_group_name = azurerm_resource_group.mlops.name
+  allowed_subnet_cidr = var.allowed_subnet_cidr
+  tags                = local.common_tags
 }
 
 # Storage Module - Storage Account, Container Registry
@@ -209,7 +209,7 @@ module "cache" {
   resource_group_name        = azurerm_resource_group.mlops.name
   key_vault_id               = module.ml_workspace.key_vault_id
   log_analytics_workspace_id = module.ml_workspace.log_analytics_workspace_id
-  monitor_action_group_id    = module.ml_workspace.application_insights_id  # Placeholder - should use monitoring module
+  monitor_action_group_id    = module.ml_workspace.application_insights_id # Placeholder - should use monitoring module
   enable_redis_cache         = var.enable_redis_cache
   redis_cache_capacity       = var.redis_cache_capacity
   redis_cache_family         = var.redis_cache_family
@@ -227,26 +227,26 @@ module "cache" {
 module "devops_integration" {
   source = "./modules/devops-integration"
 
-  resource_prefix                        = local.resource_prefix
-  location                               = azurerm_resource_group.mlops.location
-  resource_group_name                    = azurerm_resource_group.mlops.name
-  suffix                                 = local.suffix
-  ml_workspace_id                        = module.ml_workspace.workspace_id
-  storage_account_id                     = module.storage.storage_account_id
-  storage_account_name                   = module.storage.storage_account_name
-  storage_account_primary_access_key     = module.storage.storage_account_primary_access_key
-  key_vault_id                           = module.ml_workspace.key_vault_id
+  resource_prefix                          = local.resource_prefix
+  location                                 = azurerm_resource_group.mlops.location
+  resource_group_name                      = azurerm_resource_group.mlops.name
+  suffix                                   = local.suffix
+  ml_workspace_id                          = module.ml_workspace.workspace_id
+  storage_account_id                       = module.storage.storage_account_id
+  storage_account_name                     = module.storage.storage_account_name
+  storage_account_primary_access_key       = module.storage.storage_account_primary_access_key
+  key_vault_id                             = module.ml_workspace.key_vault_id
   application_insights_instrumentation_key = module.ml_workspace.application_insights_instrumentation_key
-  enable_devops_integration              = var.enable_devops_integration
-  enable_powerbi                         = var.enable_powerbi
-  enable_mssql                           = var.enable_mssql
-  enable_cognitive_services              = var.enable_cognitive_services
-  enable_synapse                         = var.enable_synapse
-  enable_communication_service           = var.enable_communication_service
-  enable_data_factory                    = var.enable_data_factory
-  notification_email                     = var.notification_email
-  slack_webhook_url                      = var.slack_webhook_url
-  tags                                   = local.common_tags
+  enable_devops_integration                = var.enable_devops_integration
+  enable_powerbi                           = var.enable_powerbi
+  enable_mssql                             = var.enable_mssql
+  enable_cognitive_services                = var.enable_cognitive_services
+  enable_synapse                           = var.enable_synapse
+  enable_communication_service             = var.enable_communication_service
+  enable_data_factory                      = var.enable_data_factory
+  notification_email                       = var.notification_email
+  slack_webhook_url                        = var.slack_webhook_url
+  tags                                     = local.common_tags
 
   depends_on = [module.ml_workspace, module.storage]
 }
@@ -265,7 +265,7 @@ module "cost_management" {
   resource_group_id          = azurerm_resource_group.mlops.id
   storage_account_name       = module.storage.storage_account_name
   log_analytics_workspace_id = module.ml_workspace.log_analytics_workspace_id
-  monitor_action_group_id    = module.ml_workspace.application_insights_id  # Placeholder
+  monitor_action_group_id    = module.ml_workspace.application_insights_id # Placeholder
   enable_cost_alerts         = var.enable_cost_alerts
   enable_data_factory        = var.enable_data_factory
   enable_logic_app           = var.enable_logic_app

@@ -59,11 +59,11 @@ resource "azurerm_key_vault_secret" "sql_admin_password" {
 
 # SQL Database for analytics
 resource "azurerm_mssql_database" "mlops_analytics" {
-  count      = var.enable_devops_integration && var.enable_mssql ? 1 : 0
-  name       = "${var.resource_prefix}-sqldb-analytics"
-  server_id  = azurerm_mssql_server.mlops_analytics[0].id
-  sku_name   = "GP_S_Gen5_1"
-  min_capacity = 0.5
+  count                       = var.enable_devops_integration && var.enable_mssql ? 1 : 0
+  name                        = "${var.resource_prefix}-sqldb-analytics"
+  server_id                   = azurerm_mssql_server.mlops_analytics[0].id
+  sku_name                    = "GP_S_Gen5_1"
+  min_capacity                = 0.5
   auto_pause_delay_in_minutes = 60
 
   tags = var.tags
@@ -144,12 +144,12 @@ resource "azurerm_linux_function_app" "ml_events_processor" {
 
 # Stream Analytics Job for real-time analytics
 resource "azurerm_stream_analytics_job" "ml_analytics" {
-  count                                = var.enable_devops_integration ? 1 : 0
-  name                                 = "${var.resource_prefix}-stream-analytics"
-  location                             = var.location
-  resource_group_name                  = var.resource_group_name
-  streaming_units                      = 3
-  transformation_query                 = <<QUERY
+  count                                    = var.enable_devops_integration ? 1 : 0
+  name                                     = "${var.resource_prefix}-stream-analytics"
+  location                                 = var.location
+  resource_group_name                      = var.resource_group_name
+  streaming_units                          = 3
+  transformation_query                     = <<QUERY
 SELECT
     System.Timestamp() AS WindowEnd,
     model_name,
@@ -164,11 +164,11 @@ GROUP BY
     model_name,
     TumblingWindow(minute, 5)
 QUERY
-  compatibility_level                  = "1.2"
-  data_locale                          = "en-US"
-  output_error_policy                  = "Stop"
-  events_outoforder_max_delay_in_seconds = 5
-  events_outoforder_policy             = "Adjust"
+  compatibility_level                      = "1.2"
+  data_locale                              = "en-US"
+  output_error_policy                      = "Stop"
+  events_outoforder_max_delay_in_seconds   = 5
+  events_outoforder_policy                 = "Adjust"
   events_late_arrival_max_delay_in_seconds = 5
 
   tags = var.tags
