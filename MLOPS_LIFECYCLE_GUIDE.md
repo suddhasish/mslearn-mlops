@@ -1,998 +1,1980 @@
-# Complete MLOps Lifecycle - End-to-End Integration Guide
+# MLOps Lifecycle Guide - End-to-End Implementation
 
-## 🔄 Executive Summary
-
-This document provides a comprehensive view of how all components in this MLOps solution are interconnected, from infrastructure provisioning through model deployment, monitoring, and retraining. Every script, pipeline, and configuration file works together to create a complete, enterprise-grade MLOps lifecycle.
+Complete guide for executing all phases of MLOps with clear separation between infrastructure and ML pipeline concerns.
 
 ---
 
-## 📊 Visual Architecture Flow
+## Table of Contents
+
+1. [Overview & Architecture](#overview--architecture)
+2. [Phase 0: Prerequisites & Setup](#phase-0-prerequisites--setup)
+3. [Phase 1: Infrastructure Deployment](#phase-1-infrastructure-deployment)
+4. [Phase 2: Local Experimentation](#phase-2-local-experimentation)
+5. [Phase 3: Training Pipeline](#phase-3-training-pipeline)
+6. [Phase 4: Model Registration & Validation](#phase-4-model-registration--validation)
+7. [Phase 5: Model Deployment](#phase-5-model-deployment)
+8. [Phase 6: CI/CD Automation](#phase-6-cicd-automation)
+9. [Phase 7: Monitoring & Operations](#phase-7-monitoring--operations)
+10. [Troubleshooting](#troubleshooting)
+
+---
+
+## Overview & Architecture
+
+### MLOps Layers
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MLOPS LIFECYCLE OVERVIEW                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│             CI/CD Layer (GitHub Actions)                     │
+│  Infrastructure Pipeline │ ML Training │ Deployment          │
+└─────────────────────────────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│          Infrastructure Layer (Terraform)                    │
+│  ML Workspace │ AKS │ Storage │ ACR │ Key Vault │ APIM     │
+└─────────────────────────────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│            ML Experimentation Layer                          │
+│  Notebooks │ Training Scripts │ Data Preparation            │
+└─────────────────────────────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│            ML Operations Layer                               │
+│  Training Jobs │ Model Registry │ Inference Endpoints       │
+└─────────────────────────────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│        Monitoring & Observability Layer                      │
+│  Application Insights │ Log Analytics │ Alerts              │
+└─────────────────────────────────────────────────────────────┘
+```
 
-PHASE 1: INFRASTRUCTURE SETUP (One-time)
-=========================================
-├─ Windows Machine (Developer Laptop)
-│  └─ deployment/setup-windows.ps1
-│     ├─ Installs: Terraform, Azure CLI, Git, jq
-│     ├─ Creates: Azure Storage for Terraform state
-│     ├─ Generates: terraform.tfvars
-│     └─ Triggers: terraform apply
-│
-├─ Terraform Execution (infrastructure/)
-│  ├─ main.tf → Creates: ML Workspace, Storage, VNet, Compute, ACR, KeyVault
-│  ├─ aks.tf → Creates: AKS Cluster, GPU Pool, Front Door, API Management
-│  ├─ private-endpoints.tf → Creates: Private Endpoints, DNS Zones
-│  ├─ rbac.tf → Creates: Custom Roles, Service Principal, Managed Identities
-│  ├─ monitoring.tf → Creates: App Insights, Alerts, Workbooks
-│  ├─ cost-management.tf → Creates: Budgets, Cost Exports, Automation
-│  └─ devops-integration.tf → Creates: Event Grid, Functions, Power BI
-│
-└─ Azure Resources Created (Output)
-   ├─ ML Workspace: mlops-demo-dev-mlworkspace
-   ├─ AKS Cluster: mlops-demo-dev-aks
-   ├─ Storage Account: mlopsdemodeusmjva1
-   ├─ Container Registry: mlopsdemodeusmjva1acr
-   ├─ Key Vault: mlops-demo-dev-kv
-   ├─ Application Insights: mlops-demo-dev-appinsights
-   ├─ VNet with 3 Subnets (compute, aks, endpoints)
-   └─ Event Grid Topic: mlops-demo-dev-events
+### Configuration Separation
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+| Concern | File | Purpose |
+|---------|------|---------|
+| **Infrastructure** | `infrastructure/terraform.tfvars.dev-edge-learning` | Azure resources, networking, compute |
+| **ML Pipeline** | `src/job.yml` | Training job, data, compute target |
+| **Deployment** | `kubernetes/ml-inference-deployment.yaml` | Inference endpoint, replicas, resources |
+| **CI/CD** | `.github/workflows/*.yml` | Automation workflows |
 
-PHASE 2: CONTINUOUS INTEGRATION (Every Code Change)
-===================================================
-├─ Developer Action: git push → Pull Request
-│
-├─ GitHub Actions: .github/workflows/02-manual-trigger-job.yml
-│  │
-│  ├─ JOB 1: lint
-│  │  └─ Runs: flake8 on src/ and tests/
-│  │     └─ Uses: requirements.txt
-│  │
-│  ├─ JOB 2: test
-│  │  └─ Runs: pytest with coverage
-│  │     └─ Uses: tests/test_train.py
-│  │        └─ Tests: src/model/train.py
-│  │
-│  ├─ JOB 3: submit-aml-job
-│  │  ├─ Submits: src/job.yml to Azure ML
-│  │  │  └─ Job Config:
-│  │  │     ├─ Script: src/model/train.py
-│  │  │     ├─ Data: experimentation/data/diabetes-dev.csv
-│  │  │     ├─ Compute: Azure ML Compute Cluster (from Terraform)
-│  │  │     └─ Outputs: MLflow model + metrics.json
-│  │  │
-│  │  ├─ Waits: for job completion (polls every 60s)
-│  │  │  └─ Azure ML executes:
-│  │  │     ├─ Provisions compute node
-│  │  │     ├─ Downloads training data
-│  │  │     ├─ Installs dependencies (requirements.txt)
-│  │  │     ├─ Runs train.py
-│  │  │     │  ├─ Loads data from CSV
-│  │  │     │  ├─ Splits train/test
-│  │  │     │  ├─ Trains LogisticRegression
-│  │  │     │  ├─ Logs metrics to MLflow
-│  │  │     │  │  ├─ accuracy, precision, recall, f1_score
-│  │  │     │  │  └─ Stored in ML Workspace
-│  │  │     │  └─ Saves model (MLflow format)
-│  │  │     └─ Uploads outputs to Azure Storage
-│  │  │
-│  │  ├─ Downloads: Model artifacts to GitHub runner
-│  │  │  └─ Artifact: downloaded_model/
-│  │  │     ├─ MLmodel
-│  │  │     ├─ model.pkl
-│  │  │     ├─ conda.yaml
-│  │  │     └─ metrics.json
-│  │  │
-│  │  └─ Runs: src/compare_metrics.py
-│  │     ├─ Queries: Azure ML Model Registry
-│  │     │  └─ Gets: Latest production model metrics
-│  │     ├─ Compares: New F1 vs Production F1
-│  │     └─ Writes: improved.txt (true/false)
-│  │
-│  ├─ JOB 4: approval (conditional)
-│  │  ├─ Triggers: Only if improved=true
-│  │  ├─ Environment: model-registration (GitHub)
-│  │  └─ Waits: for manual approval from reviewer
-│  │
-│  └─ JOB 5: register-model (after approval)
-│     └─ Runs: src/register_local.py
-│        ├─ Connects: to Azure ML Workspace
-│        ├─ Registers: Model with metadata
-│        │  ├─ Name: diabetes_classification
-│        │  ├─ Version: Auto-incremented
-│        │  ├─ Tags: f1_score, accuracy, git_commit
-│        │  └─ Properties: training_data, algorithm
-│        └─ Triggers: Event Grid notification
-│           └─ Topic: mlops-demo-dev-events
-│              └─ Event: model.registered
-│
-└─ Outputs:
-   ├─ Model registered in Azure ML Model Registry
-   ├─ Event Grid notification sent
-   └─ Ready for CD pipeline
+---
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## Phase 0: Prerequisites & Setup
 
-PHASE 3: CONTINUOUS DEPLOYMENT (After Model Registration)
-==========================================================
-├─ Trigger: Manual workflow_dispatch OR Event Grid notification
-│  └─ Inputs: model_name, model_version, workspace, resource_group
-│
-├─ GitHub Actions: .github/workflows/cd-deploy.yml
-│  │
-│  ├─ JOB 1: deploy-staging
-│  │  ├─ Creates: Azure ML Managed Online Endpoint (staging)
-│  │  │  └─ Name: my-ml-endpoint-stg
-│  │  │     ├─ Auth: Key-based
-│  │  │     └─ Location: Same as ML Workspace
-│  │  │
-│  │  ├─ Deploys: Model to staging
-│  │  │  └─ Deployment: stg-deployment
-│  │  │     ├─ Model: diabetes_classification:N (from registry)
-│  │  │     ├─ Scoring Script: src/score.py
-│  │  │     ├─ Instance: Standard_DS3_v2 (1 node)
-│  │  │     └─ Traffic: 100%
-│  │  │
-│  │  ├─ Waits: for endpoint provisioning (up to 5 min)
-│  │  │
-│  │  ├─ Gets: Scoring URI and Key
-│  │  │  └─ From: Azure ML endpoint credentials
-│  │  │
-│  │  └─ Tests: Endpoint with sample data
-│  │     └─ Runs: scripts/test_endpoint.py
-│  │        ├─ Sends: POST request with diabetes features
-│  │        ├─ Verifies: HTTP 200 response
-│  │        └─ Validates: Prediction format
-│  │
-│  ├─ JOB 2: prepare-prod
-│  │  ├─ Creates: Azure ML Managed Online Endpoint (production)
-│  │  │  └─ Name: my-ml-endpoint-prod
-│  │  │
-│  │  ├─ Ensures: BLUE deployment exists
-│  │  │  └─ If first deployment:
-│  │  │     └─ Creates: prod-blue-deployment
-│  │  │        ├─ Model: Current production model
-│  │  │        ├─ Instances: 2 (for HA)
-│  │  │        └─ Traffic: 100%
-│  │  │
-│  │  ├─ Creates: GREEN deployment (new model)
-│  │  │  └─ Name: prod-green-deployment
-│  │  │     ├─ Model: diabetes_classification:N (new)
-│  │  │     ├─ Instances: 1 (initial)
-│  │  │     └─ Traffic: 0% (no traffic yet)
-│  │  │
-│  │  ├─ Waits: for green deployment provisioning
-│  │  │
-│  │  └─ Tests: Green deployment in isolation
-│  │     └─ Uses: Deployment-specific URI
-│  │        └─ Runs: test_endpoint.py
-│  │
-│  ├─ JOB 3: await-approval
-│  │  ├─ Environment: production (GitHub)
-│  │  ├─ Notification: Email/Slack to reviewers
-│  │  └─ Waits: for manual approval
-│  │     └─ Reviewers verify:
-│  │        ├─ Staging test results
-│  │        ├─ Green deployment health
-│  │        └─ Business readiness
-│  │
-│  └─ JOB 4: rollout (Blue-Green Traffic Shift)
-│     │
-│     ├─ STEP 1: Shift 10% to GREEN
-│     │  ├─ Updates: Endpoint traffic split
-│     │  │  └─ BLUE: 90%, GREEN: 10%
-│     │  ├─ Waits: 15 seconds for propagation
-│     │  ├─ Runs: Smoke test (test_endpoint.py)
-│     │  └─ If fails: Rollback to BLUE 100%
-│     │
-│     ├─ STEP 2: Shift 50% to GREEN
-│     │  ├─ Updates: BLUE: 50%, GREEN: 50%
-│     │  ├─ Waits: 15 seconds
-│     │  ├─ Runs: Smoke test
-│     │  └─ If fails: Rollback to BLUE 100%
-│     │
-│     ├─ STEP 3: Shift 100% to GREEN
-│     │  ├─ Updates: GREEN: 100%
-│     │  ├─ Waits: 15 seconds
-│     │  ├─ Runs: Smoke test
-│     │  └─ If fails: Rollback to BLUE 100%
-│     │
-│     └─ Success: GREEN receives all traffic
-│        └─ Options:
-│           ├─ Keep BLUE for quick rollback
-│           └─ OR Scale down/delete BLUE
-│
-└─ Outputs:
-   ├─ Model deployed to production
-   ├─ Zero-downtime deployment
-   └─ Application Insights logs all requests
+### 0.1 Install Required Tools
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```powershell
+# Azure CLI
+winget install Microsoft.AzureCLI
 
-PHASE 4: MONITORING & ALERTING (Continuous)
-============================================
-├─ Azure Monitor (24/7 monitoring)
-│  └─ monitoring.tf creates:
-│     │
-│     ├─ Metric Alerts:
-│     │  ├─ ML Job Failures
-│     │  │  └─ Triggers when: Azure ML job fails
-│     │  │     └─ Action: Email + Slack notification
-│     │  │
-│     │  ├─ Storage Availability
-│     │  │  └─ Triggers when: Storage < 99%
-│     │  │     └─ Action: Email notification
-│     │  │
-│     │  ├─ AKS CPU Usage
-│     │  │  └─ Triggers when: CPU > 80% for 5 min
-│     │  │     └─ Action: Auto-scale + alert
-│     │  │
-│     │  └─ AKS Memory Usage
-│     │     └─ Triggers when: Memory > 80%
-│     │        └─ Action: Auto-scale + alert
-│     │
-│     ├─ Application Insights:
-│     │  ├─ Tracks: All endpoint requests
-│     │  │  ├─ Latency (P50, P95, P99)
-│     │  │  ├─ Error rate
-│     │  │  ├─ Request volume
-│     │  │  └─ Dependencies
-│     │  │
-│     │  ├─ Web Tests: Synthetic monitoring
-│     │  │  └─ Pings endpoint every 5 min
-│     │  │     └─ Alerts if: 3 consecutive failures
-│     │  │
-│     │  └─ Custom Metrics:
-│     │     ├─ Model prediction latency
-│     │     ├─ Prediction distribution
-│     │     └─ Data drift score
-│     │
-│     └─ Log Analytics Workspace:
-│        ├─ Stores: All logs (30-day retention dev, 90-day prod)
-│        ├─ Queries: Pre-built KQL queries
-│        │  ├─ Failed ML jobs
-│        │  ├─ Slow predictions (>500ms)
-│        │  ├─ Error patterns
-│        │  └─ Cost analysis
-│        └─ Workbook: Custom dashboard
-│           └─ Visualizes: KPIs, trends, anomalies
-│
-├─ Cost Management (Daily)
-│  └─ cost-management.tf creates:
-│     ├─ Budget: $525/mo (dev), $875/mo (prod)
-│     │  └─ Alert at: 80%, 90%, 100%
-│     │     └─ Action: Email notification
-│     │
-│     ├─ Cost Export: Daily to storage
-│     │  └─ Schedule: Every day at 00:00 UTC
-│     │     └─ Output: CSV in blob storage
-│     │
-│     └─ Automation Account: Cost optimization
-│        └─ Runbook: Scale down resources
-│           ├─ Schedule: Weekdays 6 PM - 6 AM
-│           └─ Actions:
-│              ├─ Scale AKS to 1 node
-│              └─ Stop dev compute clusters
-│
-└─ Event Grid (Real-time)
-   └─ devops-integration.tf creates:
-      ├─ Topic: mlops-demo-dev-events
-      │  └─ Subscriptions:
-      │     ├─ Model Registered → Trigger CD pipeline
-      │     ├─ Deployment Failed → Send alert
-      │     └─ Job Completed → Update dashboard
-      │
-      └─ Function App: Event handler
-         └─ Functions:
-            ├─ on_model_registered()
-            │  └─ Sends: Slack/Teams notification
-            ├─ on_deployment_complete()
-            │  └─ Updates: Power BI dashboard
-            └─ on_alert_triggered()
-               └─ Creates: Azure DevOps work item
+# Terraform
+winget install Hashicorp.Terraform
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Kubectl
+az aks install-cli
 
-PHASE 5: AUTOMATED RETRAINING (Scheduled)
-==========================================
-├─ Trigger: Cron schedule (Daily at 22:41 UTC)
-│  └─ OR Manual workflow_dispatch
-│
-├─ GitHub Actions: .github/workflows/scheduled-hyper-tune.yml
-│  │
-│  └─ JOB: submit-and-monitor-sweep
-│     │
-│     ├─ Submits: src/hyperparameter_sweep.yml
-│     │  └─ Sweep Config:
-│     │     ├─ Algorithm: Random sampling
-│     │     ├─ Objective: Maximize f1_score
-│     │     ├─ Parameters:
-│     │     │  ├─ C: [0.01, 0.1, 1, 10, 100]
-│     │     │  ├─ max_iter: [100, 200, 300]
-│     │     │  └─ solver: [liblinear, saga]
-│     │     ├─ Max trials: 20
-│     │     ├─ Max concurrent: 4
-│     │     └─ Timeout: 3600s
-│     │
-│     ├─ Azure ML Executes:
-│     │  ├─ Creates: 20 child jobs
-│     │  ├─ Runs: In parallel (max 4 concurrent)
-│     │  │  └─ Each job:
-│     │  │     ├─ Provisions compute node
-│     │  │     ├─ Runs train.py with hyperparameters
-│     │  │     ├─ Logs metrics to MLflow
-│     │  │     └─ Saves model
-│     │  └─ Identifies: Best trial (highest f1_score)
-│     │
-│     ├─ Polls: Sweep status every 60s (max 12 hours)
-│     │
-│     ├─ Gets: Best trial ID
-│     │  └─ Queries: properties.best_trial.id
-│     │
-│     ├─ Downloads: Best trial model artifacts
-│     │
-│     └─ Registers: Best model to Azure ML
-│        └─ Triggers: Event Grid → CD pipeline
-│           └─ Automatic deployment to staging/prod
-│
-└─ Outputs:
-   ├─ Best model registered
-   ├─ Hyperparameter search results in MLflow
-   └─ Next deployment triggered
+# Python 3.8+
+winget install Python.Python.3.11
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Git
+winget install Git.Git
 
-PHASE 6: INCIDENT RESPONSE (On Demand)
-=======================================
-├─ Scenario: Production endpoint returns errors
-│
-├─ Detection:
-│  ├─ Application Insights detects: Error rate > 5%
-│  ├─ Metric Alert triggers
-│  └─ Action Group sends: Email + Slack notification
-│
-├─ Investigation:
-│  ├─ Open: Azure Portal → Application Insights
-│  ├─ Query: Log Analytics
-│  │  └─ KQL: traces | where severityLevel > 2
-│  ├─ Identify: Root cause
-│  │  └─ Options:
-│  │     ├─ Bad model predictions
-│  │     ├─ Data drift
-│  │     ├─ Infrastructure issue
-│  │     └─ Code bug
-│  │
-│  └─ Access logs:
-│     ├─ Application Insights → Failures
-│     ├─ AKS logs: kubectl logs
-│     └─ ML Workspace → Job history
-│
-├─ Rollback (if needed):
-│  │
-│  ├─ OPTION 1: Via GitHub Actions
-│  │  ├─ Go to: cd-deploy.yml workflow
-│  │  ├─ Find: Last successful run
-│  │  └─ Re-run: with previous model version
-│  │
-│  ├─ OPTION 2: Via Azure CLI
-│  │  └─ Commands:
-│  │     az ml online-endpoint update \
-│  │       --name my-ml-endpoint-prod \
-│  │       --traffic "prod-blue-deployment=100"
-│  │
-│  └─ OPTION 3: Via Azure Portal
-│     ├─ Navigate: ML Workspace → Endpoints
-│     ├─ Select: my-ml-endpoint-prod
-│     └─ Update: Traffic to previous deployment
-│
-├─ Retraining (if data drift):
-│  ├─ Manually trigger: scheduled-hyper-tune.yml
-│  ├─ Wait: for best model identification
-│  └─ Deploy: via cd-deploy.yml
-│
-└─ Post-mortem:
-   ├─ Document: in Azure DevOps Wiki
-   ├─ Update: Monitoring alerts
-   └─ Improve: Error handling in code
+# Verify installations
+az --version
+terraform --version
+kubectl version --client
+python --version
+git --version
+```
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+### 0.2 Install Python Dependencies
 
-PHASE 7: INFRASTRUCTURE UPDATES (As Needed)
-============================================
-├─ Scenario: Need to add GPU compute cluster
-│
-├─ Developer Action:
-│  ├─ Opens: infrastructure/main.tf
-│  ├─ Adds: New compute cluster configuration
-│  │  └─ Example:
-│  │     resource "azurerm_machine_learning_compute_cluster" "gpu_cluster" {
-│  │       name                 = "gpu-cluster"
-│  │       machine_learning_workspace_id = azurerm_machine_learning_workspace.main.id
-│  │       vm_size              = "Standard_NC6s_v3"
-│  │       vm_priority          = "Dedicated"
-│  │       scale_settings {
-│  │         min_node_count = 0
-│  │         max_node_count = 4
-│  │       }
-│  │     }
-│  │
-│  ├─ Updates: variables.tf (if needed)
-│  └─ Commits: git commit -m "feat: add GPU compute cluster"
-│
-├─ GitHub Actions: .github/workflows/infrastructure-deploy.yml
-│  │
-│  ├─ Trigger: Pull Request
-│  │
-│  ├─ JOB 1: terraform-validate
-│  │  └─ Runs: terraform validate
-│  │
-│  ├─ JOB 2: terraform-plan-dev
-│  │  ├─ Runs: terraform plan
-│  │  ├─ Shows: Changes to be applied
-│  │  └─ Comments: Plan output on PR
-│  │
-│  ├─ PR Review: Team reviews Terraform plan
-│  │
-│  ├─ PR Merge: After approval
-│  │
-│  ├─ JOB 3: terraform-apply-dev
-│  │  ├─ Environment: dev (GitHub)
-│  │  ├─ Waits: for approval
-│  │  └─ Runs: terraform apply
-│  │     └─ Creates: GPU compute cluster
-│  │
-│  ├─ JOB 4: terraform-plan-prod
-│  │  └─ Runs: terraform plan for prod
-│  │
-│  └─ JOB 5: terraform-apply-prod
-│     ├─ Environment: production (GitHub)
-│     ├─ Waits: for approval
-│     ├─ Runs: terraform apply
-│     └─ Notifies: Slack with deployment summary
-│
-└─ Outputs:
-   ├─ GPU cluster available in Azure ML
-   └─ Ready to use in job.yml
+```powershell
+cd D:\MLOPS\MLOPS-AZURE\mslearn-mlops
+pip install -r requirements.txt
+```
 
+Expected packages:
+- `azure-ai-ml` - Azure ML SDK
+- `mlflow` - Experiment tracking
+- `scikit-learn` - ML algorithms
+- `pandas`, `numpy` - Data processing
+
+### 0.3 Azure Login & Setup
+
+```powershell
+# Login to Azure
+az login
+
+# List subscriptions
+az account list --output table
+
+# Set active subscription
+az account set --subscription "your-subscription-name"
+
+# Verify current subscription
+az account show --query "{Name:name, SubscriptionId:id}" -o table
+```
+
+### 0.4 Create Service Principal for Automation
+
+```powershell
+# Get subscription ID
+$SUBSCRIPTION_ID = az account show --query id -o tsv
+
+# Create service principal with Contributor role
+$sp = az ad sp create-for-rbac `
+  --name "terraform-mlops-sp" `
+  --role Contributor `
+  --scopes "/subscriptions/$SUBSCRIPTION_ID" | ConvertFrom-Json
+
+# Format for GitHub secret
+$credentials = @{
+    clientId = $sp.appId
+    clientSecret = $sp.password
+    subscriptionId = $SUBSCRIPTION_ID
+    tenantId = $sp.tenant
+} | ConvertTo-Json -Compress
+
+Write-Host "`n✅ Service Principal Created!"
+Write-Host "`nCopy this JSON for GitHub secret AZURE_CLIENT_SECRET:"
+Write-Host $credentials
+```
+
+### 0.5 Configure GitHub Secrets
+
+Navigate to: **GitHub Repository → Settings → Secrets and variables → Actions → New repository secret**
+
+| Secret Name | Value | Example |
+|------------|-------|---------|
+| `PROJECT_NAME` | Unique project identifier | `azureml-dev` |
+| `AZURE_LOCATION` | Azure region | `eastus` |
+| `NOTIFICATION_EMAIL` | Email for alerts | `ops@company.com` |
+| `AZURE_CLIENT_SECRET` | Service principal JSON | `{"clientId":"..."}` |
+
+### 0.6 Clone Repository
+
+```powershell
+cd D:\MLOPS
+git clone https://github.com/your-org/mslearn-mlops.git
+cd mslearn-mlops
 ```
 
 ---
 
-## 🔗 File Interconnection Matrix
+## Phase 1: Infrastructure Deployment
 
-### Infrastructure Layer
+### 1.1 Review Dev Configuration
 
-| File | Creates | Used By | Outputs |
-|------|---------|---------|---------|
-| `setup-windows.ps1` | Terraform backend, tfvars | Developer (one-time) | Storage account, tfvars file |
-| `main.tf` | ML Workspace, Storage, VNet, Compute | All pipelines | workspace_name, resource_group |
-| `aks.tf` | AKS cluster, Front Door, API Mgmt | cd-deploy.yml | aks_cluster_name |
-| `rbac.tf` | Service principal, roles | All GitHub Actions | AZURE_CREDENTIALS secret |
-| `monitoring.tf` | App Insights, alerts | Runtime monitoring | connection_string |
-| `outputs.tf` | All resource details | GitHub secrets config | 50+ output values |
-
-### Application Layer
-
-| File | Purpose | Triggered By | Calls | Output |
-|------|---------|--------------|-------|--------|
-| `src/model/train.py` | Model training | job.yml (Azure ML) | None | model.pkl, metrics.json |
-| `src/job.yml` | Training job config | 02-manual-trigger-job.yml | train.py | Completed Azure ML job |
-| `src/hyperparameter_sweep.yml` | Sweep config | scheduled-hyper-tune.yml | train.py (multiple) | Best trial model |
-| `src/score.py` | Inference endpoint | Azure ML deployment | train.py model | Predictions |
-| `src/compare_metrics.py` | Metric comparison | 02-manual-trigger-job.yml | Azure ML API | improved.txt |
-| `src/register_local.py` | Model registration | 02-manual-trigger-job.yml | Azure ML API | Registered model |
-| `scripts/test_endpoint.py` | Smoke tests | cd-deploy.yml | Scoring endpoint | Pass/Fail |
-
-### CI/CD Layer
-
-| Workflow | Triggers | Calls | Approval Gates | Notifications |
-|----------|----------|-------|----------------|---------------|
-| `infrastructure-deploy.yml` | PR, Manual | Terraform | dev, production | PR comment, Slack |
-| `02-manual-trigger-job.yml` | PR, Manual | job.yml, compare_metrics.py, register_local.py | model-registration | None |
-| `cd-deploy.yml` | Manual, Event | score.py, test_endpoint.py | production | None |
-| `04-code-checks.yml` | Manual | flake8 | None | None |
-| `scheduled-hyper-tune.yml` | Cron (daily) | hyperparameter_sweep.yml, register_local.py | None | None |
-
----
-
-## 🎯 Data Flow Diagrams
-
-### Training Data Flow
-```
-experimentation/data/diabetes-dev.csv
-    ↓ (uploaded by Azure ML)
-Azure Blob Storage (ML Workspace)
-    ↓ (mounted in training job)
-Azure ML Compute Cluster
-    ↓ (train.py reads)
-Pandas DataFrame
-    ↓ (train/test split)
-Scikit-learn LogisticRegression
-    ↓ (MLflow logs)
-Azure ML Workspace (Experiment Tracking)
-    ↓ (download via CLI)
-GitHub Runner (downloaded_model/)
-    ↓ (register_local.py)
-Azure ML Model Registry
-    ↓ (cd-deploy.yml references)
-AKS Endpoint (Production)
+```powershell
+# Open configuration file
+code infrastructure/terraform.tfvars.dev-edge-learning
 ```
 
-### Model Serving Flow
-```
-External Client (HTTP POST)
-    ↓
-Azure Front Door (routing, WAF)
-    ↓
-API Management (throttling, caching)
-    ↓
-AKS Load Balancer
-    ↓
-AKS Pod (score.py running)
-    ↓ (loads model)
-Registered Model (from Azure ML)
-    ↓ (inference)
-Prediction Result (JSON)
-    ↓ (logs to)
-Application Insights
-    ↓ (queries)
-Log Analytics Dashboard
-```
+**Key Settings:**
 
-### Monitoring Flow
-```
-Production Endpoint (AKS)
-    ↓ (sends metrics)
-Application Insights
-    ↓ (evaluates)
-Metric Alert Rules (monitoring.tf)
-    ↓ (triggers)
-Action Groups
-    ├─ Email notification
-    ├─ Slack webhook
-    └─ Event Grid event
-        ↓
-    Function App (devops-integration.tf)
-        ├─ Creates: Azure DevOps work item
-        └─ Updates: Power BI dashboard
+```hcl
+# Core (replaced by GitHub secrets at runtime)
+project_name = "VAR_PROJECT_NAME"
+location     = "VAR_AZURE_LOCATION"
+environment  = "dev"
+
+# Inference Stack (enabled for learning)
+enable_aks_deployment = true      # Kubernetes cluster
+enable_api_management = true      # API Gateway
+enable_front_door     = true      # Global routing
+enable_redis_cache    = false     # Optional caching
+
+# DevOps Integration (disabled in dev)
+enable_devops_integration = false
+enable_data_factory      = false
+
+# Cost
+monthly_budget_amount = 75        # Alert threshold
+enable_cost_alerts    = true
+
+# Compute
+aks_node_count = 1               # Single node for dev
+aks_vm_size    = "Standard_D4s_v3"
 ```
 
----
+### 1.2 Setup Terraform Backend
 
-## 🔄 Complete Lifecycle Scenarios
+The backend stores Terraform state remotely in Azure Storage for team collaboration.
 
-### Scenario 1: New Feature Development (Full Cycle)
-
-```
-DAY 1: Development
-------------------
-Developer:
-1. git checkout -b feature/improve-model
-2. Edit: src/model/train.py (add feature engineering)
-3. Test locally: python src/model/train.py
-4. git commit -m "feat: add polynomial features"
-5. git push origin feature/improve-model
-6. Creates: Pull Request on GitHub
-
-GitHub Actions (Auto):
-7. Triggers: 02-manual-trigger-job.yml
-   ├─ lint: flake8 checks (30 seconds)
-   ├─ test: pytest runs (1 minute)
-   ├─ submit-aml-job: Training starts (10 minutes)
-   ├─ compare-metrics: F1 improved! (30 seconds)
-   └─ PAUSES: Waiting for approval
-
-Team Lead:
-8. Reviews: PR + training metrics
-9. Approves: In GitHub (model-registration environment)
-
-GitHub Actions (Auto):
-10. register-model: Model registered to Azure ML
-11. Event Grid: Sends "model.registered" event
-
-DAY 2: Staging Deployment
--------------------------
-ML Engineer:
-12. Goes to: GitHub Actions
-13. Triggers: cd-deploy.yml (workflow_dispatch)
-14. Inputs:
-    - model_name: diabetes_classification
-    - model_version: 5 (from registration)
-    - workspace: mlops-demo-dev-mlworkspace
-    - resource_group: mlops-demo-dev-rg
-
-GitHub Actions (Auto):
-15. deploy-staging:
-    ├─ Creates: my-ml-endpoint-stg
-    ├─ Deploys: Model version 5
-    ├─ Tests: Smoke tests pass
-    └─ Outputs: Staging URL
-
-QA Team:
-16. Tests: Staging endpoint manually
-17. Validates: Business logic
-18. Approves: Production deployment
-
-DAY 3: Production Deployment
-----------------------------
-GitHub Actions (Auto):
-19. prepare-prod:
-    ├─ Creates: prod-green-deployment (v5)
-    ├─ Tests: Green in isolation
-    └─ PAUSES: Waiting for production approval
-
-DevOps Lead:
-20. Reviews: Staging results
-21. Approves: In GitHub (production environment)
-
-GitHub Actions (Auto):
-22. rollout:
-    ├─ 10% → GREEN: Tests pass ✅
-    ├─ 50% → GREEN: Tests pass ✅
-    └─ 100% → GREEN: Tests pass ✅
-23. Deployment complete!
-
-Monitoring (Continuous):
-24. Application Insights: Tracks all requests
-25. Alert: If error rate > 5%
-26. Power BI: Dashboard updated with new model metrics
-```
-
-### Scenario 2: Automated Weekly Retraining
-
-```
-SUNDAY 22:41 UTC: Cron Trigger
--------------------------------
-GitHub Actions (Auto):
-1. Triggers: scheduled-hyper-tune.yml
-2. submit-and-monitor-sweep:
-   ├─ Submits: hyperparameter_sweep.yml
-   └─ Azure ML starts: 20 parallel training jobs
-
-SUNDAY 22:45 - 02:00: Training
--------------------------------
-Azure ML Compute:
-3. Provisions: 4 compute nodes (max concurrent)
-4. Runs: 20 trials in parallel batches
-   ├─ Trial 1: C=0.01, max_iter=100, f1=0.72
-   ├─ Trial 2: C=0.1, max_iter=100, f1=0.74
-   ├─ ...
-   └─ Trial 20: C=10, max_iter=300, f1=0.78 ← BEST
-5. MLflow: Logs all trial metrics
-
-MONDAY 02:00: Sweep Complete
------------------------------
-GitHub Actions (Auto):
-6. Gets: Best trial ID (Trial 20)
-7. Downloads: Best model artifacts
-8. register-local.py: Registers model v6
-9. Event Grid: Sends notification
-
-MONDAY 09:00: Manual Review
-----------------------------
-Data Science Team:
-10. Receives: Slack notification
-11. Reviews: MLflow experiment results
-12. Validates: Model improvement
-13. Decision: Deploy to production
-
-MONDAY 10:00: Deploy New Model
--------------------------------
-ML Engineer:
-14. Triggers: cd-deploy.yml (manual)
-15. Same blue-green process as Scenario 1
-```
-
-### Scenario 3: Production Incident Response
-
-```
-WEDNESDAY 14:32: Incident Start
---------------------------------
-Production Endpoint:
-1. Starts: Returning HTTP 500 errors
-2. Error rate: 15% (above 5% threshold)
-
-Application Insights (Auto):
-3. Metric alert: Triggers immediately
-4. Action Group:
-   ├─ Sends: Email to on-call engineer
-   └─ Sends: Slack notification to #alerts
-
-WEDNESDAY 14:35: Investigation
--------------------------------
-On-Call Engineer:
-5. Opens: Azure Portal → Application Insights
-6. Queries: Log Analytics
-   └─ KQL: requests | where resultCode == 500 | top 100
-7. Identifies: Input data format changed
-8. Decision: Rollback immediately
-
-WEDNESDAY 14:40: Rollback
---------------------------
-Engineer:
-9. Opens: Azure Portal → ML Workspace → Endpoints
-10. Clicks: my-ml-endpoint-prod
-11. Updates: Traffic
-    └─ prod-blue-deployment: 100%
-    └─ prod-green-deployment: 0%
-12. Clicks: Apply
-
-Azure ML (Auto):
-13. Shifts: All traffic to BLUE (previous version)
-14. Takes: ~30 seconds to propagate
-
-WEDNESDAY 14:42: Verification
-------------------------------
-Engineer:
-15. Checks: Application Insights (Live Metrics)
-16. Confirms: Error rate drops to 0%
-17. Tests: Endpoint manually (curl)
-18. Status: Incident resolved
-
-WEDNESDAY 15:00: Root Cause Analysis
--------------------------------------
-Team:
-19. Reviews: Application Insights traces
-20. Identifies: Client changed JSON schema
-21. Documents: In Azure DevOps Wiki
-22. Action Items:
-    ├─ Add: Schema validation in score.py
-    ├─ Improve: Integration tests
-    └─ Update: API documentation
-
-THURSDAY: Permanent Fix
------------------------
-Developer:
-23. Updates: score.py with input validation
-24. Commits: git commit -m "fix: add input schema validation"
-25. PR: Triggers full CI/CD cycle
-26. Deploys: Fixed version via cd-deploy.yml
-```
-
----
-
-## 📋 Dependencies & Prerequisites
-
-### Infrastructure Layer Dependencies
-```
-setup-windows.ps1
-├─ Requires: PowerShell 7+, Admin privileges
-├─ Installs: Chocolatey → Terraform, Azure CLI, Git, jq
-└─ Creates: Azure Storage Account → Terraform state
-
-infrastructure/*.tf
-├─ Requires: Terraform 1.6.0+, Azure CLI 2.50+
-├─ State: Azure Blob Storage (from setup-windows.ps1)
-└─ Credentials: Service Principal (from rbac.tf)
-
-GitHub Actions
-├─ Requires: GitHub Secrets configured
-│  ├─ AZURE_CREDENTIALS (from rbac.tf output)
-│  ├─ TF_STATE_* (from setup-windows.ps1)
-│  └─ AZURE_ML_* (from outputs.tf)
-└─ Permissions: id-token: write, contents: read
-```
-
-### Application Layer Dependencies
-```
-src/model/train.py
-├─ Requires: requirements.txt packages
-│  ├─ numpy, pandas, scikit-learn
-│  ├─ mlflow, azureml-mlflow
-│  └─ azure-ai-ml
-└─ Data: experimentation/data/diabetes-dev.csv
-
-src/job.yml
-├─ Requires: Azure ML Workspace (from main.tf)
-├─ Compute: Compute cluster (from main.tf)
-└─ Environment: Docker image with requirements.txt
-
-src/score.py
-├─ Requires: Registered model (from register_local.py)
-└─ Environment: Inference environment with mlflow
-```
-
-### Pipeline Dependencies
-```
-02-manual-trigger-job.yml
-├─ Requires: job.yml, compare_metrics.py, register_local.py
-└─ Secrets: AZURE_CREDENTIALS, AZURE_ML_*
-
-cd-deploy.yml
-├─ Requires: Registered model, test_endpoint.py
-├─ Secrets: AZURE_CREDENTIALS, AZURE_ML_*
-└─ Environments: production (GitHub)
-
-infrastructure-deploy.yml
-├─ Requires: Terraform files, Azure credentials
-├─ Secrets: AZURE_CREDENTIALS, TF_STATE_*
-└─ Environments: dev, production (GitHub)
-```
-
----
-
-## 🎯 Critical Success Paths
-
-### Path 1: Infrastructure Deployment (First Time)
-```
-✅ Run setup-windows.ps1
-   ↓ (creates Terraform backend)
-✅ Terraform apply via setup script
-   ↓ (creates all Azure resources)
-✅ Configure GitHub Secrets
-   ↓ (using outputs.tf values)
-✅ Infrastructure ready
-   └─ ML Workspace, AKS, Storage, Monitoring all operational
-```
-
-### Path 2: Model Development → Production
-```
-✅ Developer commits code
-   ↓ (triggers CI pipeline)
-✅ Tests pass + Training completes
-   ↓ (metrics compared)
-✅ Approval granted
-   ↓ (model registered)
-✅ Staging deployment
-   ↓ (smoke tests pass)
-✅ Production approval
-   ↓ (blue-green rollout)
-✅ Model in production
-   └─ Serving traffic, monitored 24/7
-```
-
-### Path 3: Incident → Recovery
-```
-🔴 Alert triggered
-   ↓ (Application Insights)
-✅ Investigation
-   ↓ (Log Analytics)
-✅ Rollback decision
-   ↓ (traffic shift)
-✅ Service restored
-   ↓ (error rate 0%)
-✅ Post-mortem
-   └─ Improvements implemented
-```
-
----
-
-## 🔧 Configuration Chain
-
-### Terraform Variables Flow
-```
-terraform.tfvars.example
-   ↓ (copied by setup-windows.ps1)
-terraform.tfvars (local, gitignored)
-   ↓ (read by Terraform)
-variables.tf (definitions)
-   ↓ (used in modules)
-main.tf, aks.tf, etc. (resources)
-   ↓ (creates Azure resources)
-outputs.tf (exports)
-   ↓ (used for GitHub Secrets)
-GitHub Secrets (configured manually)
-   ↓ (used by workflows)
-GitHub Actions (runtime)
-```
-
-### Model Registry Flow
-```
-train.py (trains model)
-   ↓ (saves MLflow format)
-Azure ML Job (uploads outputs)
-   ↓ (stored in workspace storage)
-compare_metrics.py (evaluates)
-   ↓ (queries Model Registry)
-register_local.py (registers if improved)
-   ↓ (creates new version)
-Azure ML Model Registry (stores)
-   ↓ (referenced by name:version)
-cd-deploy.yml (deploys)
-   ↓ (creates endpoint)
-score.py (loads and serves)
-```
-
----
-
-## 📊 Success Metrics & KPIs
-
-### Infrastructure Metrics
-- ✅ Deployment time: **20 minutes** (target: < 30 min)
-- ✅ Infrastructure cost: **$525/mo dev** (within budget)
-- ✅ Availability: **99.9%** (target: > 99%)
-- ✅ Automation: **100%** (target: 100%)
-
-### CI/CD Metrics
-- ✅ Build time: **15 minutes** (target: < 20 min)
-- ✅ Deployment frequency: **Daily** (target: daily)
-- ✅ Lead time: **4 hours** (target: < 8 hours)
-- ✅ Change failure rate: **< 5%** (target: < 15%)
-
-### Model Performance Metrics
-- ✅ Training time: **10 minutes** (per job)
-- ✅ Inference latency: **< 100ms** P95 (target: < 200ms)
-- ✅ Model accuracy: **> 75%** (target: > 70%)
-- ✅ Uptime: **99.9%** (target: > 99%)
-
----
-
-## 🚀 Quick Reference Commands
-
-### Deploy Infrastructure
 ```powershell
 cd deployment
-.\setup-windows.ps1 -Environment dev
+
+# Run backend setup
+./setup-terraform-backend.ps1 `
+  -ProjectName "azureml" `
+  -Environment "dev" `
+  -Location "eastus"
 ```
 
-### Trigger CI Pipeline
-```bash
-git checkout -b feature/new-model
-git push origin feature/new-model
-# Creates PR → triggers 02-manual-trigger-job.yml
+**What this creates:**
+- Resource Group: `terraform-state-rg`
+- Storage Account: `tfstateXXXXX` (unique suffix)
+- Container: `tfstate`
+- State File: `dev.mlops.tfstate`
+
+### 1.3 Verify Backend Configuration
+
+```powershell
+cd ../infrastructure
+code backend.tf
 ```
 
-### Deploy Model
-```bash
-# Via GitHub UI: Actions → CD Deploy → Run workflow
-# OR via gh CLI:
-gh workflow run cd-deploy.yml \
-  -f model_name=diabetes_classification \
-  -f model_version=5 \
-  -f aml_workspace=mlops-demo-dev-mlworkspace \
-  -f resource_group=mlops-demo-dev-rg \
-  -f subscription_id=$AZURE_SUBSCRIPTION_ID
+Ensure configuration matches your backend:
+
+```hcl
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "terraform-state-rg"
+    storage_account_name = "tfstateXXXXX"  # Your actual storage account
+    container_name       = "tfstate"
+    key                  = "dev.mlops.tfstate"
+  }
+}
 ```
 
-### Check Monitoring
-```bash
-# Application Insights
-az monitor app-insights query \
-  --app mlops-demo-dev-appinsights \
-  --analytics-query "requests | summarize count() by resultCode"
+### 1.4 Deploy Infrastructure via GitHub Actions
 
-# Log Analytics
-az monitor log-analytics query \
-  --workspace mlops-demo-dev-logs \
-  --analytics-query "AzureDiagnostics | where TimeGenerated > ago(1h)"
+**Option A: Via GitHub UI (Recommended)**
+
+1. Navigate to: **GitHub → Actions → Infrastructure Deployment**
+2. Click: **Run workflow**
+3. Configure:
+   - **Environment**: `dev`
+   - **Destroy**: `false` (leave unchecked)
+4. Click: **Run workflow**
+
+**Option B: Via Git Push**
+
+```powershell
+# Make any infrastructure change
+code infrastructure/terraform.tfvars.dev-edge-learning
+
+# Commit and push
+git add infrastructure/
+git commit -m "Update dev infrastructure configuration"
+git push origin main
 ```
 
-### Rollback Model
-```bash
-# Via Azure CLI
-az ml online-endpoint update \
-  --name my-ml-endpoint-prod \
-  --traffic prod-blue-deployment=100 \
-  --resource-group mlops-demo-dev-rg \
-  --workspace-name mlops-demo-dev-mlworkspace
+### 1.5 Monitor Deployment
+
+**Pipeline Stages:**
+
+```
+1. terraform-validate     ✓ Syntax check (2-3 min)
+2. terraform-plan-dev     ✓ Generate plan (3-5 min)
+3. terraform-apply-dev    ✓ Deploy resources (20-30 min)
+   ├─ Requires approval
+   └─ Creates Azure resources
+```
+
+**Expected Resources Created:**
+
+| Resource Type | Name Pattern | Purpose |
+|---------------|-------------|---------|
+| Resource Group | `{project}-dev-rg` | Container for all resources |
+| ML Workspace | `{project}-dev-ml` | Azure ML workspace |
+| AKS Cluster | `{project}-dev-aks` | Kubernetes for inference |
+| Storage Account | `{project}devst{hash}` | Data & model storage |
+| Container Registry | `{project}devacr{hash}` | Docker images |
+| Key Vault | `{project}-dev-kv` | Secrets management |
+| API Management | `{project}-dev-apim` | API gateway |
+| Front Door | `{project}-dev-fd` | Global routing |
+| Application Insights | `{project}-dev-appinsights` | Monitoring |
+| Log Analytics | `{project}-dev-logs` | Log aggregation |
+| Virtual Network | `{project}-dev-vnet` | Networking |
+
+**Typical Deployment Times:**
+- ML Workspace: ~5 minutes
+- AKS Cluster: ~12-15 minutes (longest)
+- API Management: ~8-10 minutes
+- Other resources: ~5-10 minutes
+- **Total: 20-30 minutes**
+
+### 1.6 Verify Deployment
+
+```powershell
+# Set variables
+$RG_NAME = "azureml-dev-rg"  # Update with your actual name
+
+# List all resources
+az resource list --resource-group $RG_NAME --output table
+
+# Get ML Workspace details
+$WORKSPACE_NAME = az ml workspace list `
+  --resource-group $RG_NAME `
+  --query "[0].name" -o tsv
+
+Write-Host "✅ ML Workspace: $WORKSPACE_NAME"
+
+# Get AKS Cluster details
+$AKS_NAME = az aks list `
+  --resource-group $RG_NAME `
+  --query "[0].name" -o tsv
+
+Write-Host "✅ AKS Cluster: $AKS_NAME"
+
+# Verify AKS is running
+az aks show `
+  --resource-group $RG_NAME `
+  --name $AKS_NAME `
+  --query "{Name:name, Status:provisioningState, Version:kubernetesVersion}" -o table
+
+# Get AKS credentials for kubectl
+az aks get-credentials `
+  --resource-group $RG_NAME `
+  --name $AKS_NAME `
+  --overwrite-existing
+
+# Verify kubectl access
+kubectl get nodes
+kubectl get namespaces
+```
+
+### 1.7 Access Azure ML Studio
+
+```powershell
+# Open ML Studio in browser
+Write-Host "Opening Azure ML Studio..."
+Start-Process "https://ml.azure.com"
+
+# Or get direct workspace URL
+$workspaceId = az ml workspace show `
+  --name $WORKSPACE_NAME `
+  --resource-group $RG_NAME `
+  --query "id" -o tsv
+
+Write-Host "Direct link: https://ml.azure.com/?workspace=$workspaceId"
 ```
 
 ---
 
-## 🎓 Summary
+## Phase 2: Local Experimentation
 
-This MLOps solution provides a **complete, production-ready lifecycle** with:
+### 2.1 Configure Azure ML CLI
 
-1. ✅ **Automated Infrastructure**: Terraform + PowerShell scripts
-2. ✅ **Continuous Integration**: Automated testing, training, registration
-3. ✅ **Continuous Deployment**: Blue-green with gradual rollout
-4. ✅ **24/7 Monitoring**: Application Insights + Log Analytics
-5. ✅ **Cost Optimization**: Budget alerts + automated scaling
-6. ✅ **Security**: RBAC + Private endpoints + Audit trails
-7. ✅ **Automated Retraining**: Scheduled hyperparameter tuning
-8. ✅ **Incident Response**: Rollback mechanisms + alerting
+```powershell
+# Install/upgrade Azure ML extension
+az extension add -n ml --upgrade -y
 
-Every component is interconnected, creating a seamless flow from code commit to production deployment with full observability and control.
+# Set defaults to avoid repeating parameters
+az configure --defaults `
+  group=$RG_NAME `
+  workspace=$WORKSPACE_NAME `
+  location=$LOCATION
+```
+
+### 2.2 Explore Training Data
+
+```powershell
+cd experimentation
+
+# List data files
+Get-ChildItem data/
+
+# Preview CSV data
+Get-Content data/diabetes.csv -Head 20 | Format-Table
+```
+
+**Expected Data Structure:**
+- CSV file with features: age, bmi, blood_pressure, glucose, etc.
+- Target variable: diabetes diagnosis (0/1)
+- ~400-1000 rows typical for demo dataset
+
+### 2.3 Run Jupyter Notebook (Optional)
+
+```powershell
+# Install Jupyter if not already installed
+pip install jupyter notebook
+
+# Start Jupyter server
+jupyter notebook train-classification-model.ipynb
+```
+
+**Notebook Sections:**
+1. **Data Loading** - Read CSV, check shape, preview
+2. **Data Exploration** - Statistics, distributions, correlations
+3. **Data Preprocessing** - Handle missing values, normalize
+4. **Model Training** - Train scikit-learn classifier
+5. **Evaluation** - Calculate accuracy, confusion matrix
+6. **Model Export** - Save model for deployment
+
+### 2.4 Test Training Script Locally
+
+```powershell
+cd ../src
+
+# Review training script
+code train.py
+```
+
+**Key Script Components:**
+
+```python
+import mlflow
+from sklearn.ensemble import RandomForestClassifier
+import pandas as pd
+
+def main(args):
+    # Load data
+    data = pd.read_csv(args.data_path)
+    
+    # Split features and target
+    X = data.drop('target', axis=1)
+    y = data['target']
+    
+    # Train model
+    model = RandomForestClassifier()
+    model.fit(X, y)
+    
+    # Log metrics
+    mlflow.log_metric("accuracy", accuracy)
+    
+    # Save model
+    mlflow.sklearn.log_model(model, "model")
+```
+
+**Test Locally:**
+
+```powershell
+# Create virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install azure-ai-ml mlflow scikit-learn pandas numpy
+
+# Run training script
+python train.py --data-path ../experimentation/data --epochs 5
+```
 
 ---
 
-**Need more details on any specific component? Check the respective documentation:**
-- Infrastructure: `README.md`
-- Setup: `WINDOWS_QUICKSTART.md`
-- Project status: `PROJECT_SUMMARY.md`
-- CI/CD verification: `CI_CD_COMPLETION_STATUS.md`
+## Phase 3: Training Pipeline
+
+### 3.1 Create Compute Cluster
+
+```powershell
+# Check if compute exists
+az ml compute list -o table
+
+# Create CPU cluster if needed
+az ml compute create `
+  --name cpu-cluster `
+  --type amlcompute `
+  --size Standard_DS3_v2 `
+  --min-instances 0 `
+  --max-instances 4 `
+  --idle-time-before-scale-down 120
+
+# Verify
+az ml compute show --name cpu-cluster -o table
+```
+
+**Compute Options:**
+
+| VM Size | vCPUs | RAM | Use Case | Cost/hr |
+|---------|-------|-----|----------|---------|
+| Standard_DS3_v2 | 4 | 14GB | General training | ~$0.27 |
+| Standard_NC6 | 6 | 56GB | GPU training | ~$1.80 |
+| Standard_D4s_v3 | 4 | 16GB | Cost-effective | ~$0.19 |
+
+### 3.2 Upload Training Data to Workspace
+
+```powershell
+cd ../src
+
+# Create data asset configuration
+@"
+`$schema: https://azuremlschemas.azureedge.net/latest/data.schema.json
+name: diabetes-data
+version: 1
+type: uri_folder
+path: ../experimentation/data
+description: Diabetes dataset for classification
+tags:
+  dataset_type: training
+  source: local
+"@ | Out-File -FilePath data.yml -Encoding utf8
+
+# Register data asset
+az ml data create --file data.yml
+
+# Verify upload
+az ml data list -o table
+az ml data show --name diabetes-data --version 1
+```
+
+### 3.3 Review Training Job Configuration
+
+```powershell
+code job.yml
+```
+
+**Job Configuration Explained:**
+
+```yaml
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+
+# Where to run
+compute: azureml:cpu-cluster
+
+# What to run
+code: .
+command: >-
+  python train.py
+  --data-path ${{inputs.data}}
+  --epochs 10
+  --learning-rate 0.01
+
+# Input data
+inputs:
+  data:
+    type: uri_folder
+    path: azureml:diabetes-data:1  # Reference registered data
+
+# Python environment
+environment: azureml:AzureML-sklearn-1.0-ubuntu20.04-py38-cpu@latest
+
+# Experiment tracking
+experiment_name: diabetes-classification
+display_name: diabetes-training-run
+
+# Outputs
+outputs:
+  model:
+    type: mlflow_model
+```
+
+### 3.4 Submit Training Job
+
+```powershell
+# Submit job
+$JOB_NAME = az ml job create `
+  --file job.yml `
+  --query name -o tsv
+
+Write-Host "✅ Job submitted: $JOB_NAME"
+Write-Host "View in portal: https://ml.azure.com"
+```
+
+### 3.5 Monitor Training Job
+
+```powershell
+# Stream logs in real-time
+az ml job stream --name $JOB_NAME
+
+# Check status
+az ml job show --name $JOB_NAME --query status -o tsv
+
+# Get job metrics
+az ml job show --name $JOB_NAME --query outputs -o json
+```
+
+**Job Lifecycle:**
+
+```
+Queued → Preparing → Running → Finalizing → Completed
+  ↓         ↓          ↓           ↓            ↓
+ 1min     2-3min    5-10min      1min        Done
+```
+
+### 3.6 View Results in ML Studio
+
+**In Azure ML Studio (https://ml.azure.com):**
+
+1. Navigate to: **Jobs** (left menu)
+2. Click on your job name
+3. Explore tabs:
+   - **Overview**: Status, duration, compute
+   - **Metrics**: Accuracy, loss, custom metrics
+   - **Images**: Charts, confusion matrix
+   - **Outputs + logs**: Model files, logs
+   - **Code**: Training script snapshot
+
+### 3.7 Download Job Outputs
+
+```powershell
+# Download all outputs
+az ml job download `
+  --name $JOB_NAME `
+  --download-path ./outputs
+
+# Check downloaded files
+Get-ChildItem ./outputs -Recurse
+```
+
+**Expected Outputs:**
+- `model/` - MLflow model artifacts
+- `logs/` - Training logs
+- `metrics/` - Recorded metrics (JSON)
+
+---
+
+## Phase 4: Model Registration & Validation
+
+### 4.1 Register Model from Training Job
+
+```powershell
+# Register model from job outputs
+az ml model create `
+  --name diabetes-classifier `
+  --version 1 `
+  --type mlflow_model `
+  --path "azureml://jobs/$JOB_NAME/outputs/model" `
+  --description "Diabetes classification model - RandomForest" `
+  --tags "algorithm=RandomForest" "dataset=diabetes" "environment=dev"
+
+Write-Host "✅ Model registered"
+```
+
+### 4.2 Verify Model Registration
+
+```powershell
+# List all models
+az ml model list -o table
+
+# Show specific model version
+az ml model show `
+  --name diabetes-classifier `
+  --version 1 -o json
+```
+
+### 4.3 Download Model for Local Testing
+
+```powershell
+# Download model artifacts
+az ml model download `
+  --name diabetes-classifier `
+  --version 1 `
+  --download-path ./downloaded-model
+
+# Check model structure
+Get-ChildItem ./downloaded-model -Recurse
+```
+
+**Model Structure:**
+```
+downloaded-model/
+├── MLmodel              # MLflow metadata
+├── conda.yaml           # Environment dependencies
+├── requirements.txt     # Python packages
+├── python_env.yaml      # Python version
+└── model.pkl            # Serialized model
+```
+
+### 4.4 Test Model Locally
+
+```powershell
+code test_model_local.py
+```
+
+```python
+import mlflow
+import pandas as pd
+
+# Load model
+model = mlflow.pyfunc.load_model("./downloaded-model")
+
+# Create test data
+test_data = pd.DataFrame({
+    'age': [50, 35, 60],
+    'bmi': [25.5, 28.0, 32.1],
+    'blood_pressure': [120, 130, 140],
+    # ... add all required features
+})
+
+# Make predictions
+predictions = model.predict(test_data)
+print(f"Predictions: {predictions}")
+```
+
+**Run Test:**
+
+```powershell
+python test_model_local.py
+```
+
+### 4.5 Compare Model Versions
+
+```powershell
+code compare_models.py
+```
+
+```python
+from azure.ai.ml import MLClient
+from azure.identity import DefaultAzureCredential
+
+# Connect to workspace
+ml_client = MLClient(
+    DefaultAzureCredential(),
+    subscription_id="your-sub-id",
+    resource_group_name="azureml-dev-rg",
+    workspace_name="azureml-dev-ml"
+)
+
+# Get all versions
+models = ml_client.models.list(name="diabetes-classifier")
+
+# Compare
+for model in models:
+    print(f"\nVersion: {model.version}")
+    print(f"Tags: {model.tags}")
+    print(f"Created: {model.creation_context.created_at}")
+    
+    # Get metrics from tags if stored
+    if 'accuracy' in model.tags:
+        print(f"Accuracy: {model.tags['accuracy']}")
+```
+
+---
+
+## Phase 5: Model Deployment
+
+### 5.1 Review Scoring Script
+
+```powershell
+cd ../src
+code score.py
+```
+
+**Key Components:**
+
+```python
+import json
+import mlflow
+import numpy as np
+
+# Global variables
+MODEL = None
+MODEL_VERSION = "1.0"
+REQUEST_COUNT = 0
+ERROR_COUNT = 0
+
+def init():
+    """Called once when container starts"""
+    global MODEL
+    import os
+    
+    # Load model from registered location
+    model_path = os.path.join(
+        os.getenv("AZUREML_MODEL_DIR"),
+        "model"
+    )
+    MODEL = mlflow.pyfunc.load_model(model_path)
+    print(f"✅ Model loaded: version {MODEL_VERSION}")
+
+def run(raw_data):
+    """Called for each request"""
+    global REQUEST_COUNT, ERROR_COUNT
+    REQUEST_COUNT += 1
+    
+    try:
+        # Parse JSON input
+        data = json.loads(raw_data)["data"]
+        
+        # Make prediction
+        predictions = MODEL.predict(data)
+        
+        # Return results
+        return predictions.tolist()
+        
+    except Exception as e:
+        ERROR_COUNT += 1
+        return json.dumps({"error": str(e)})
+
+def health():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "model_version": MODEL_VERSION,
+        "requests_served": REQUEST_COUNT,
+        "errors": ERROR_COUNT,
+        "error_rate": ERROR_COUNT / REQUEST_COUNT if REQUEST_COUNT > 0 else 0
+    }
+
+def readiness():
+    """Readiness probe for Kubernetes"""
+    return {"ready": MODEL is not None}
+
+def liveness():
+    """Liveness probe for Kubernetes"""
+    return {"alive": True}
+```
+
+### 5.2 Deploy to Azure Container Instance (Quick Test)
+
+```powershell
+# Create managed online endpoint
+az ml online-endpoint create `
+  --name diabetes-endpoint-dev
+
+# Create deployment configuration
+@"
+`$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineDeployment.schema.json
+name: blue
+endpoint_name: diabetes-endpoint-dev
+model: azureml:diabetes-classifier:1
+code_configuration:
+  code: .
+  scoring_script: score.py
+instance_type: Standard_DS2_v2
+instance_count: 1
+environment: azureml:AzureML-sklearn-1.0-ubuntu20.04-py38-cpu@latest
+"@ | Out-File -FilePath deployment.yml -Encoding utf8
+
+# Deploy
+az ml online-deployment create `
+  --file deployment.yml `
+  --all-traffic
+
+# Wait for deployment
+az ml online-endpoint show --name diabetes-endpoint-dev
+```
+
+### 5.3 Test Managed Endpoint
+
+```powershell
+# Get endpoint URI and key
+$ENDPOINT_URI = az ml online-endpoint show `
+  --name diabetes-endpoint-dev `
+  --query scoring_uri -o tsv
+
+$API_KEY = az ml online-endpoint get-credentials `
+  --name diabetes-endpoint-dev `
+  --query primaryKey -o tsv
+
+# Create test request
+$testData = @{
+    data = @(
+        @(50, 25.5, 120, 80, 180, 35, 0.5, 1.2)
+    )
+} | ConvertTo-Json -Depth 3
+
+# Make prediction request
+$headers = @{
+    "Content-Type" = "application/json"
+    "Authorization" = "Bearer $API_KEY"
+}
+
+$response = Invoke-RestMethod `
+  -Uri $ENDPOINT_URI `
+  -Method Post `
+  -Headers $headers `
+  -Body $testData
+
+Write-Host "Prediction: $response"
+```
+
+### 5.4 Deploy to AKS (Production-Ready)
+
+**Get AKS and ACR Details:**
+
+```powershell
+$RG_NAME = "azureml-dev-rg"
+
+$AKS_NAME = az aks list `
+  --resource-group $RG_NAME `
+  --query "[0].name" -o tsv
+
+$ACR_NAME = az acr list `
+  --resource-group $RG_NAME `
+  --query "[0].name" -o tsv
+
+Write-Host "AKS: $AKS_NAME"
+Write-Host "ACR: $ACR_NAME"
+
+# Get AKS credentials
+az aks get-credentials `
+  --resource-group $RG_NAME `
+  --name $AKS_NAME `
+  --overwrite-existing
+```
+
+**Build Docker Image:**
+
+```powershell
+# Create Dockerfile
+@"
+FROM mcr.microsoft.com/azureml/minimal-ubuntu20.04-py38-cpu-inference:latest
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# Copy scoring script
+COPY score.py /app/
+COPY model/ /var/azureml-app/model/
+
+# Set working directory
+WORKDIR /app
+
+# Expose port
+EXPOSE 5001
+
+# Run scoring service
+CMD ["python", "score.py"]
+"@ | Out-File -FilePath Dockerfile -Encoding utf8
+
+# Login to ACR
+az acr login --name $ACR_NAME
+
+# Build and push
+docker build -t $ACR_NAME.azurecr.io/diabetes-classifier:v1 .
+docker push $ACR_NAME.azurecr.io/diabetes-classifier:v1
+```
+
+**Deploy to Kubernetes:**
+
+```powershell
+cd ../kubernetes
+
+# Review deployment manifest
+code ml-inference-deployment.yaml
+```
+
+**Update Image Reference:**
+
+```powershell
+# Replace placeholder with actual ACR name
+(Get-Content ml-inference-deployment.yaml) `
+  -replace 'yourregistry.azurecr.io', "$ACR_NAME.azurecr.io" |
+  Set-Content ml-inference-deployment.yaml
+
+# Apply deployment
+kubectl apply -f ml-inference-deployment.yaml
+
+# Apply HPA (autoscaling)
+kubectl apply -f ml-inference-hpa.yaml
+```
+
+**Verify Deployment:**
+
+```powershell
+# Check deployment status
+kubectl get deployments
+kubectl rollout status deployment/diabetes-classifier
+
+# Check pods
+kubectl get pods -l app=diabetes-classifier
+
+# Check service
+kubectl get service diabetes-classifier-service
+
+# Get external IP (may take few minutes)
+$EXTERNAL_IP = kubectl get service diabetes-classifier-service `
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+
+Write-Host "External IP: $EXTERNAL_IP"
+```
+
+### 5.5 Test AKS Deployment
+
+```powershell
+# Wait for external IP
+while ([string]::IsNullOrEmpty($EXTERNAL_IP)) {
+    Start-Sleep -Seconds 10
+    $EXTERNAL_IP = kubectl get service diabetes-classifier-service `
+      -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+    Write-Host "Waiting for external IP..."
+}
+
+Write-Host "✅ Service ready at: http://$EXTERNAL_IP"
+
+# Test health endpoint
+Invoke-RestMethod -Uri "http://$EXTERNAL_IP/health"
+
+# Test prediction
+$testData = @{
+    data = @(
+        @(50, 25.5, 120, 80, 180, 35, 0.5, 1.2)
+    )
+} | ConvertTo-Json -Depth 3
+
+$prediction = Invoke-RestMethod `
+  -Uri "http://$EXTERNAL_IP/score" `
+  -Method Post `
+  -Body $testData `
+  -ContentType "application/json"
+
+Write-Host "Prediction: $prediction"
+```
+
+### 5.6 Monitor Deployment
+
+```powershell
+# View logs
+kubectl logs -l app=diabetes-classifier --tail=50 -f
+
+# Check resource usage
+kubectl top pods -l app=diabetes-classifier
+
+# Check HPA status
+kubectl get hpa diabetes-classifier-hpa
+
+# View events
+kubectl get events --sort-by='.lastTimestamp' --field-selector involvedObject.name=diabetes-classifier
+```
+
+---
+
+## Phase 6: CI/CD Automation
+
+### 6.1 Infrastructure CI/CD (Already Configured)
+
+**Workflow File:** `.github/workflows/infrastructure-deploy.yml`
+
+**Capabilities:**
+- ✅ Automatic validation on PR
+- ✅ Manual deployment (dev/prod)
+- ✅ Full infrastructure destroy
+- ✅ State lock auto-recovery
+- ✅ Version-controlled configuration
+
+**Usage:**
+
+```powershell
+# Option 1: Push infrastructure changes
+git add infrastructure/
+git commit -m "Update infrastructure"
+git push
+
+# Option 2: Manual trigger via GitHub UI
+# Actions → Infrastructure Deployment → Run workflow
+# Select: Environment (dev/prod) + Destroy (true/false)
+```
+
+### 6.2 ML Training CI/CD
+
+**Create Training Workflow:**
+
+```powershell
+code .github/workflows/ml-training-pipeline.yml
+```
+
+```yaml
+name: ML Training Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/train.py'
+      - 'src/job.yml'
+      - 'experimentation/data/**'
+  workflow_dispatch:
+    inputs:
+      experiment_name:
+        description: 'Experiment name'
+        required: true
+        default: 'diabetes-classification'
+
+env:
+  RESOURCE_GROUP: 'azureml-dev-rg'
+  WORKSPACE_NAME: 'azureml-dev-ml'
+
+jobs:
+  train-model:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+      
+      - name: Install Azure ML CLI
+        run: az extension add -n ml --upgrade -y
+      
+      - name: Upload Training Data
+        run: |
+          cd src
+          az ml data create --file data.yml \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --workspace-name ${{ env.WORKSPACE_NAME }}
+      
+      - name: Submit Training Job
+        id: train
+        run: |
+          cd src
+          JOB_NAME=$(az ml job create --file job.yml \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --workspace-name ${{ env.WORKSPACE_NAME }} \
+            --query name -o tsv)
+          
+          echo "job_name=$JOB_NAME" >> $GITHUB_OUTPUT
+          echo "✅ Job submitted: $JOB_NAME"
+      
+      - name: Monitor Training Job
+        run: |
+          echo "Monitoring job: ${{ steps.train.outputs.job_name }}"
+          az ml job stream --name ${{ steps.train.outputs.job_name }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --workspace-name ${{ env.WORKSPACE_NAME }}
+      
+      - name: Check Job Status
+        run: |
+          STATUS=$(az ml job show --name ${{ steps.train.outputs.job_name }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --workspace-name ${{ env.WORKSPACE_NAME }} \
+            --query status -o tsv)
+          
+          if [ "$STATUS" != "Completed" ]; then
+            echo "❌ Job failed with status: $STATUS"
+            exit 1
+          fi
+          
+          echo "✅ Job completed successfully"
+      
+      - name: Register Model
+        run: |
+          az ml model create \
+            --name diabetes-classifier \
+            --type mlflow_model \
+            --path "azureml://jobs/${{ steps.train.outputs.job_name }}/outputs/model" \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --workspace-name ${{ env.WORKSPACE_NAME }}
+          
+          echo "✅ Model registered"
+      
+      - name: Create Job Summary
+        run: |
+          echo "## 🎯 Training Job Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Job Name**: ${{ steps.train.outputs.job_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Completed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Model**: diabetes-classifier (new version)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View in ML Studio](https://ml.azure.com)" >> $GITHUB_STEP_SUMMARY
+```
+
+**Commit Workflow:**
+
+```powershell
+git add .github/workflows/ml-training-pipeline.yml
+git commit -m "Add ML training pipeline"
+git push
+```
+
+### 6.3 Model Deployment CI/CD
+
+```powershell
+code .github/workflows/model-deployment-pipeline.yml
+```
+
+```yaml
+name: Model Deployment Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_version:
+        description: 'Model version to deploy'
+        required: true
+        default: '1'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+
+env:
+  MODEL_NAME: 'diabetes-classifier'
+
+jobs:
+  deploy-to-aks:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CLIENT_SECRET }}
+      
+      - name: Set Environment Variables
+        run: |
+          echo "RESOURCE_GROUP=azureml-${{ github.event.inputs.environment }}-rg" >> $GITHUB_ENV
+          echo "WORKSPACE_NAME=azureml-${{ github.event.inputs.environment }}-ml" >> $GITHUB_ENV
+      
+      - name: Get AKS Credentials
+        run: |
+          AKS_NAME=$(az aks list \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query "[0].name" -o tsv)
+          
+          az aks get-credentials \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name $AKS_NAME \
+            --overwrite-existing
+          
+          echo "AKS_NAME=$AKS_NAME" >> $GITHUB_ENV
+      
+      - name: Download Model
+        run: |
+          az extension add -n ml --upgrade -y
+          
+          az ml model download \
+            --name ${{ env.MODEL_NAME }} \
+            --version ${{ github.event.inputs.model_version }} \
+            --download-path ./model \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --workspace-name ${{ env.WORKSPACE_NAME }}
+      
+      - name: Build and Push Docker Image
+        run: |
+          ACR_NAME=$(az acr list \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query "[0].name" -o tsv)
+          
+          az acr login --name $ACR_NAME
+          
+          IMAGE_TAG="${{ github.event.inputs.model_version }}-${{ github.sha }}"
+          IMAGE_NAME="$ACR_NAME.azurecr.io/${{ env.MODEL_NAME }}:$IMAGE_TAG"
+          
+          cd src
+          docker build -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+          
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+      
+      - name: Update Kubernetes Deployment
+        run: |
+          cd kubernetes
+          
+          # Update image in deployment manifest
+          sed -i "s|image:.*|image: ${{ env.IMAGE_NAME }}|g" ml-inference-deployment.yaml
+          
+          # Apply deployment
+          kubectl apply -f ml-inference-deployment.yaml
+          kubectl apply -f ml-inference-hpa.yaml
+          
+          # Wait for rollout
+          kubectl rollout status deployment/diabetes-classifier --timeout=5m
+      
+      - name: Verify Deployment
+        run: |
+          echo "## 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Model**: ${{ env.MODEL_NAME }}:${{ github.event.inputs.model_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AKS Cluster**: ${{ env.AKS_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Get service endpoint
+          EXTERNAL_IP=$(kubectl get service diabetes-classifier-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "- **Endpoint**: http://$EXTERNAL_IP" >> $GITHUB_STEP_SUMMARY
+          
+          # Get pod status
+          kubectl get pods -l app=diabetes-classifier >> $GITHUB_STEP_SUMMARY
+```
+
+**Commit Workflow:**
+
+```powershell
+git add .github/workflows/model-deployment-pipeline.yml
+git commit -m "Add model deployment pipeline"
+git push
+```
+
+### 6.4 Complete Automation Flow
+
+**End-to-End Workflow:**
+
+```
+1. Developer pushes code changes to src/train.py
+   ↓
+2. GitHub Actions: ML Training Pipeline triggers
+   ├─ Uploads data
+   ├─ Submits training job
+   ├─ Monitors completion
+   └─ Registers model (new version)
+   ↓
+3. Manual approval required for deployment
+   ↓
+4. GitHub Actions: Model Deployment Pipeline (manual trigger)
+   ├─ Downloads model
+   ├─ Builds Docker image
+   ├─ Pushes to ACR
+   ├─ Updates Kubernetes deployment
+   └─ Verifies deployment
+   ↓
+5. Model live in production
+```
+
+**Trigger Workflows:**
+
+```powershell
+# Option 1: Automatic (push code)
+git add src/train.py
+git commit -m "Improve model performance"
+git push  # → Triggers training pipeline
+
+# Option 2: Manual (GitHub UI)
+# Actions → ML Training Pipeline → Run workflow
+# Actions → Model Deployment Pipeline → Run workflow → Select version
+```
+
+---
+
+## Phase 7: Monitoring & Operations
+
+### 7.1 Application Insights Setup
+
+**Access Application Insights:**
+
+```powershell
+# Get Application Insights details
+$APP_INSIGHTS = az monitor app-insights component list `
+  --resource-group $RG_NAME `
+  --query "[0].name" -o tsv
+
+Write-Host "Application Insights: $APP_INSIGHTS"
+
+# Get instrumentation key
+$INSTRUMENTATION_KEY = az monitor app-insights component show `
+  --app $APP_INSIGHTS `
+  --resource-group $RG_NAME `
+  --query instrumentationKey -o tsv
+
+# Open in Azure Portal
+Start-Process "https://portal.azure.com/#resource$(az monitor app-insights component show --app $APP_INSIGHTS --resource-group $RG_NAME --query id -o tsv)"
+```
+
+### 7.2 Query Application Insights Logs
+
+**In Azure Portal: Application Insights → Logs**
+
+**Sample KQL Queries:**
+
+```kusto
+// 1. Request latency (P50, P95, P99)
+requests
+| where timestamp > ago(1h)
+| summarize 
+    P50_ms = percentile(duration, 50),
+    P95_ms = percentile(duration, 95),
+    P99_ms = percentile(duration, 99),
+    RequestCount = count()
+    by bin(timestamp, 5m)
+| render timechart
+
+// 2. Error rate over time
+requests
+| where timestamp > ago(24h)
+| summarize 
+    TotalRequests = count(),
+    FailedRequests = countif(success == false)
+    by bin(timestamp, 1h)
+| extend ErrorRate = (FailedRequests * 100.0) / TotalRequests
+| render timechart with (ytitle="Error Rate %")
+
+// 3. Top slow requests
+requests
+| where timestamp > ago(1h)
+| where duration > 200  // Slower than 200ms
+| top 20 by duration desc
+| project timestamp, name, duration, resultCode, url
+
+// 4. Request volume by hour
+requests
+| where timestamp > ago(7d)
+| summarize RequestCount = count() by bin(timestamp, 1h)
+| render timechart
+
+// 5. Model prediction traces
+traces
+| where message contains "Prediction"
+| project timestamp, message, severityLevel
+| order by timestamp desc
+| take 100
+
+// 6. Application exceptions
+exceptions
+| where timestamp > ago(24h)
+| project timestamp, type, outerMessage, innermostMessage
+| order by timestamp desc
+```
+
+### 7.3 Monitor AKS Cluster
+
+```powershell
+# Node resource usage
+kubectl top nodes
+
+# Pod resource usage
+kubectl top pods -l app=diabetes-classifier
+
+# HPA status
+kubectl get hpa diabetes-classifier-hpa
+
+# Check autoscaling events
+kubectl describe hpa diabetes-classifier-hpa
+
+# View pod logs
+kubectl logs -l app=diabetes-classifier --tail=100 -f
+
+# Check pod health
+kubectl get pods -l app=diabetes-classifier -o wide
+
+# View recent events
+kubectl get events --sort-by='.lastTimestamp' | Select-Object -Last 20
+```
+
+### 7.4 Cost Monitoring
+
+```powershell
+# View daily costs (last 7 days)
+az consumption usage list `
+  --start-date (Get-Date).AddDays(-7).ToString("yyyy-MM-dd") `
+  --end-date (Get-Date).ToString("yyyy-MM-dd") `
+  --query "[].{Date:usageStart,Cost:pretaxCost,Resource:instanceName}" `
+  --output table
+
+# Check budget status
+az consumption budget list `
+  --resource-group $RG_NAME `
+  --query "[].{Name:name,Amount:amount,CurrentSpend:currentSpend.amount}" `
+  --output table
+
+# View cost by resource type
+az consumption usage list `
+  --start-date (Get-Date).AddDays(-30).ToString("yyyy-MM-dd") `
+  --query "[].{Type:meterCategory,Cost:pretaxCost}" |
+  ConvertFrom-Json |
+  Group-Object Type |
+  Select-Object Name, @{N='TotalCost';E={($_.Group | Measure-Object Cost -Sum).Sum}} |
+  Sort-Object TotalCost -Descending
+```
+
+**Expected Monthly Costs (Dev Environment):**
+
+| Resource | Monthly Cost | Percentage |
+|----------|-------------|------------|
+| AKS Cluster | $70-90 | 35-40% |
+| API Management | $50 | 20-25% |
+| Azure Front Door | $40-50 | 18-22% |
+| ML Workspace | $10 | 4-5% |
+| Storage | $5-10 | 2-4% |
+| Log Analytics | $10-15 | 4-6% |
+| Other | $10-20 | 4-8% |
+| **Total** | **$220-260** | **100%** |
+
+### 7.5 Review Configured Alerts
+
+```powershell
+# List all alert rules
+az monitor metrics alert list `
+  --resource-group $RG_NAME `
+  --output table
+
+# Show specific alert details
+az monitor metrics alert show `
+  --resource-group $RG_NAME `
+  --name "SLO - P95 Latency" `
+  --output json
+
+# List action groups (notification channels)
+az monitor action-group list `
+  --resource-group $RG_NAME `
+  --output table
+```
+
+**Pre-configured Alerts:**
+
+1. **SLO P95 Latency** - Triggers if 95th percentile > 200ms
+2. **SLO P99 Latency** - Triggers if 99th percentile > 500ms
+3. **SLO Error Rate** - Triggers if error rate > 1%
+4. **ML Job Failure** - Triggers when training jobs fail
+5. **Budget Alert** - Triggers at 80% of monthly budget ($60 for dev)
+
+### 7.6 Load Testing
+
+```powershell
+# Get service endpoint
+$EXTERNAL_IP = kubectl get service diabetes-classifier-service `
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+
+Write-Host "Testing endpoint: http://$EXTERNAL_IP/score"
+
+# Generate load (100 requests)
+1..100 | ForEach-Object {
+    $testData = @{
+        data = @(
+            @(50, 25.5, 120, 80, 180, 35, 0.5, 1.2)
+        )
+    } | ConvertTo-Json -Depth 3
+    
+    try {
+        $response = Invoke-RestMethod `
+          -Uri "http://$EXTERNAL_IP/score" `
+          -Method Post `
+          -Body $testData `
+          -ContentType "application/json" `
+          -TimeoutSec 5
+        
+        Write-Host "Request $_`: Success"
+    }
+    catch {
+        Write-Host "Request $_`: Failed - $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# Check HPA scaling
+Start-Sleep -Seconds 30
+kubectl get hpa diabetes-classifier-hpa
+kubectl get pods -l app=diabetes-classifier
+```
+
+### 7.7 Model Performance Monitoring
+
+**Create Monitoring Script:**
+
+```powershell
+code src/monitor_model_performance.py
+```
+
+```python
+from azure.ai.ml import MLClient
+from azure.identity import DefaultAzureCredential
+from azure.monitor.query import LogsQueryClient
+from datetime import datetime, timedelta
+import pandas as pd
+
+# Connect to workspace
+ml_client = MLClient(
+    DefaultAzureCredential(),
+    subscription_id="your-subscription-id",
+    resource_group_name="azureml-dev-rg",
+    workspace_name="azureml-dev-ml"
+)
+
+# Connect to Application Insights
+logs_client = LogsQueryClient(DefaultAzureCredential())
+
+# Query prediction logs
+query = """
+traces
+| where message contains 'Prediction'
+| project timestamp, message
+| order by timestamp desc
+| take 1000
+"""
+
+# Get logs from last 24 hours
+end_time = datetime.utcnow()
+start_time = end_time - timedelta(hours=24)
+
+response = logs_client.query_workspace(
+    workspace_id="your-app-insights-workspace-id",
+    query=query,
+    timespan=(start_time, end_time)
+)
+
+# Analyze predictions
+predictions_df = pd.DataFrame(response.tables[0].rows)
+
+# Calculate metrics
+total_predictions = len(predictions_df)
+avg_confidence = predictions_df['confidence'].mean()
+
+print(f"📊 Model Performance (Last 24h)")
+print(f"Total Predictions: {total_predictions}")
+print(f"Average Confidence: {avg_confidence:.2%}")
+
+# Check for drift
+if avg_confidence < 0.70:
+    print("⚠️ Low confidence detected - consider retraining")
+
+# Log metrics to ML Workspace
+from mlflow import log_metric, set_tracking_uri
+set_tracking_uri(ml_client.workspaces.get("azureml-dev-ml").mlflow_tracking_uri)
+
+log_metric("production_predictions_24h", total_predictions)
+log_metric("production_avg_confidence", avg_confidence)
+```
+
+**Run Monitoring:**
+
+```powershell
+python src/monitor_model_performance.py
+```
+
+---
+
+## Troubleshooting
+
+### Issue 1: Terraform State Lock
+
+**Symptom:**
+```
+Error: Error acquiring the state lock
+Lock ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+**Solution:**
+
+```powershell
+cd infrastructure
+
+# Option 1: Auto-unlock (built into pipeline)
+# Pipeline now automatically detects and unlocks
+
+# Option 2: Manual unlock
+$LOCK_ID = "lock-id-from-error-message"
+terraform force-unlock -force $LOCK_ID
+
+# Option 3: If state corrupted
+# Check for errored.tfstate file
+if (Test-Path errored.tfstate) {
+    # Push errored state
+    terraform state push errored.tfstate
+    
+    # Or start fresh (DANGEROUS - only if you know what you're doing)
+    # Remove-Item .terraform/terraform.tfstate
+    # terraform init -reconfigure
+}
+```
+
+### Issue 2: AKS Cluster Issues
+
+**Symptom:** Nodes not ready, pods crashing
+
+**Diagnosis:**
+
+```powershell
+# Check node status
+kubectl get nodes
+kubectl describe node <node-name>
+
+# Check pod status
+kubectl get pods -l app=diabetes-classifier
+kubectl describe pod <pod-name>
+
+# Check pod logs
+kubectl logs <pod-name> --previous  # Previous container logs
+kubectl logs <pod-name> -f  # Follow current logs
+
+# Check events
+kubectl get events --sort-by='.lastTimestamp' --field-selector involvedObject.name=<pod-name>
+```
+
+**Solutions:**
+
+```powershell
+# Solution 1: Restart deployment
+kubectl rollout restart deployment/diabetes-classifier
+
+# Solution 2: Scale down and up
+kubectl scale deployment diabetes-classifier --replicas=0
+Start-Sleep -Seconds 30
+kubectl scale deployment diabetes-classifier --replicas=2
+
+# Solution 3: Check ACR connectivity
+$ACR_NAME = az acr list --resource-group $RG_NAME --query "[0].name" -o tsv
+az aks check-acr --resource-group $RG_NAME --name $AKS_NAME --acr "$ACR_NAME.azurecr.io"
+
+# Solution 4: Restart AKS node pool
+az aks nodepool upgrade --resource-group $RG_NAME --cluster-name $AKS_NAME --name nodepool1 --node-image-only
+```
+
+### Issue 3: High Inference Latency
+
+**Symptom:** P95 latency > 200ms, slow predictions
+
+**Diagnosis:**
+
+```powershell
+# Check current latency in Application Insights
+# Query: requests | where timestamp > ago(1h) | summarize P95=percentile(duration, 95)
+
+# Check pod resource usage
+kubectl top pods -l app=diabetes-classifier
+
+# Check HPA status
+kubectl get hpa diabetes-classifier-hpa
+```
+
+**Solutions:**
+
+```powershell
+# Solution 1: Scale up replicas
+kubectl scale deployment diabetes-classifier --replicas=5
+
+# Solution 2: Increase resource limits
+kubectl edit deployment diabetes-classifier
+# Update:
+#   resources:
+#     limits:
+#       cpu: 2000m
+#       memory: 4Gi
+
+# Solution 3: Enable Redis caching
+# Edit infrastructure/terraform.tfvars.dev-edge-learning
+# Set: enable_redis_cache = true
+# Re-deploy infrastructure
+
+# Solution 4: Optimize model
+# Use quantization, pruning, or model distillation
+# Retrain with smaller model architecture
+```
+
+### Issue 4: Training Job Stuck or Failing
+
+**Symptom:** Job shows "Running" indefinitely or fails
+
+**Diagnosis:**
+
+```powershell
+# Check job status
+az ml job show --name $JOB_NAME --query "{Status:status, Error:error}" -o table
+
+# Stream logs
+az ml job stream --name $JOB_NAME
+
+# Check compute cluster
+az ml compute show --name cpu-cluster --query "{State:provisioningState, Errors:provisioningErrors}" -o table
+
+# List running jobs
+az ml job list --query "[?status=='Running'].{Name:name,Status:status,Created:creationContext.createdAt}" -o table
+```
+
+**Solutions:**
+
+```powershell
+# Solution 1: Cancel and resubmit
+az ml job cancel --name $JOB_NAME
+az ml job create --file src/job.yml
+
+# Solution 2: Check compute availability
+az ml compute show --name cpu-cluster
+
+# If compute is deallocated, it may take 5-10 minutes to start
+
+# Solution 3: Increase timeout
+# Edit src/job.yml
+# Add: timeout_seconds: 3600  # 1 hour
+
+# Solution 4: Use different compute
+# Create new compute cluster
+az ml compute create --name cpu-cluster-large --type amlcompute --size Standard_DS4_v2 --min-instances 0 --max-instances 4
+
+# Update job.yml to use new cluster
+# compute: azureml:cpu-cluster-large
+```
+
+### Issue 5: Model Registration Fails
+
+**Symptom:** Can't register model from job
+
+**Diagnosis:**
+
+```powershell
+# Check if job produced model output
+az ml job show --name $JOB_NAME --query outputs -o json
+
+# Verify model path exists
+az ml job download --name $JOB_NAME --download-path ./outputs
+Get-ChildItem ./outputs -Recurse
+```
+
+**Solutions:**
+
+```powershell
+# Solution 1: Ensure model is logged in training script
+# In train.py, add:
+# mlflow.sklearn.log_model(model, "model")
+
+# Solution 2: Register from local path
+az ml model create `
+  --name diabetes-classifier `
+  --version 1 `
+  --path ./outputs/model `
+  --type mlflow_model
+
+# Solution 3: Check MLflow tracking URI
+# In train.py:
+# mlflow.set_tracking_uri(ml_client.workspaces.get(...).mlflow_tracking_uri)
+```
+
+### Issue 6: Deployment Health Check Fails
+
+**Symptom:** Kubernetes pod status shows unhealthy
+
+**Diagnosis:**
+
+```powershell
+# Check readiness probe
+kubectl describe pod <pod-name> | Select-String -Pattern "Readiness"
+
+# Test health endpoint locally
+kubectl port-forward pod/<pod-name> 8080:5001
+Invoke-RestMethod -Uri "http://localhost:8080/health"
+```
+
+**Solutions:**
+
+```powershell
+# Solution 1: Increase probe delays
+kubectl edit deployment diabetes-classifier
+# Update:
+#   readinessProbe:
+#     initialDelaySeconds: 30  # Increase from 10
+#     periodSeconds: 10
+
+# Solution 2: Check model loading
+kubectl logs <pod-name> | Select-String -Pattern "Model loaded"
+
+# Solution 3: Verify environment variables
+kubectl describe pod <pod-name> | Select-String -Pattern "Environment"
+```
+
+### Issue 7: Cost Overruns
+
+**Symptom:** Monthly cost exceeds budget
+
+**Diagnosis:**
+
+```powershell
+# View current month costs
+az consumption usage list `
+  --start-date (Get-Date -Day 1).ToString("yyyy-MM-dd") `
+  --end-date (Get-Date).ToString("yyyy-MM-dd") `
+  --query "[].{Resource:instanceName,Cost:pretaxCost,Quantity:quantity}" |
+  ConvertFrom-Json |
+  Group-Object Resource |
+  Select-Object Name, @{N='TotalCost';E={($_.Group | Measure-Object Cost -Sum).Sum}} |
+  Sort-Object TotalCost -Descending
+```
+
+**Solutions:**
+
+```powershell
+# Solution 1: Scale down AKS
+az aks scale --resource-group $RG_NAME --name $AKS_NAME --node-count 1
+
+# Solution 2: Stop/start AKS when not in use
+az aks stop --resource-group $RG_NAME --name $AKS_NAME  # Stop
+az aks start --resource-group $RG_NAME --name $AKS_NAME  # Start
+
+# Solution 3: Use minimal profile
+# Edit infrastructure/terraform.tfvars.dev-edge-learning
+# Set:
+# enable_aks_deployment = false
+# enable_api_management = false
+# enable_front_door = false
+# Re-deploy infrastructure
+
+# Solution 4: Delete unused resources
+az resource list --resource-group $RG_NAME --query "[].{Name:name,Type:type}" -o table
+# Delete specific resources not needed
+
+# Solution 5: Use Terraform destroy and recreate only when needed
+# Destroy: Actions → Infrastructure Deployment → Run workflow → destroy=true
+```
+
+---
+
+## Summary & Next Steps
+
+### Completion Checklist
+
+- [ ] **Phase 0**: ✅ Tools installed, Azure/GitHub configured
+- [ ] **Phase 1**: ✅ Infrastructure deployed via GitHub Actions
+- [ ] **Phase 2**: ✅ Local experimentation completed
+- [ ] **Phase 3**: ✅ Training job submitted and completed
+- [ ] **Phase 4**: ✅ Model registered and validated
+- [ ] **Phase 5**: ✅ Model deployed to AKS with autoscaling
+- [ ] **Phase 6**: ✅ CI/CD pipelines configured and tested
+- [ ] **Phase 7**: ✅ Monitoring dashboards and alerts reviewed
+
+### Configuration Files Reference
+
+| File | Purpose | When to Edit |
+|------|---------|--------------|
+| `infrastructure/terraform.tfvars.dev-edge-learning` | Infrastructure config | Change resources, features |
+| `infrastructure/terraform.tfvars.prod` | Production config | Production setup |
+| `src/job.yml` | Training job config | Change hyperparameters, compute |
+| `src/train.py` | Training logic | Improve model algorithm |
+| `src/score.py` | Inference logic | Change prediction logic |
+| `kubernetes/ml-inference-deployment.yaml` | K8s deployment | Scale, resource limits |
+| `kubernetes/ml-inference-hpa.yaml` | Autoscaling | Scaling thresholds |
+| `.github/workflows/*.yml` | CI/CD pipelines | Automation changes |
+
+### Next Steps
+
+1. **Enable Optional Features:**
+   ```powershell
+   # Enable Redis caching
+   # Edit: infrastructure/terraform.tfvars.dev-edge-learning
+   # Set: enable_redis_cache = true
+   # Commit and run infrastructure pipeline
+   ```
+
+2. **Improve Model:**
+   ```powershell
+   # Edit training script
+   code src/train.py
+   # Add: feature engineering, hyperparameter tuning
+   # Push to trigger training pipeline
+   ```
+
+3. **Setup Production:**
+   ```powershell
+   # Review production config
+   code infrastructure/terraform.tfvars.prod
+   # Deploy: Actions → Infrastructure Deployment → environment=prod
+   ```
+
+4. **Advanced Monitoring:**
+   - Create custom Application Insights dashboards
+   - Setup Slack/Teams notifications
+   - Implement drift detection
+
+5. **A/B Testing:**
+   - Deploy multiple model versions
+   - Route traffic for comparison
+   - Analyze metrics
+
+### Cost Optimization Tips
+
+- **Stop AKS when not in use**: `az aks stop`
+- **Use spot instances**: Cheaper for non-critical workloads
+- **Enable autoscaling**: Only pay for what you use
+- **Monitor and alert**: Stay on top of costs
+- **Use minimal profile**: For learning/dev environments
+
+### Resources
+
+- **Azure ML Documentation**: https://docs.microsoft.com/azure/machine-learning
+- **Terraform Azure Provider**: https://registry.terraform.io/providers/hashicorp/azurerm
+- **Kubernetes Documentation**: https://kubernetes.io/docs
+- **MLflow Documentation**: https://mlflow.org/docs/latest
+
+### Related Guides
+
+- [Configuration Management](CONFIGURATION_MANAGEMENT.md) - Version control setup
+- [Inference Best Practices](documentation/09-inference-best-practices.md) - Optimization guide
+- [Terraform Backend Setup](TERRAFORM_BACKEND_GUIDE.md) - State management
+- [Pipeline Cleanup](PIPELINE_CLEANUP_CONFIG.md) - Resource cleanup
+- [Quick Start](QUICK_START_FREE_TIER.md) - Fast setup guide
+
+---
+
+**Last Updated**: November 11, 2025  
+**Environment**: Development (dev-edge-learning)  
+**Estimated Cost**: $220-260/month  
+**Version**: 2.0
