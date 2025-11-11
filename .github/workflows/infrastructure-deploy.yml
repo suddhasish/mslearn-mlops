@@ -121,15 +121,25 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR_DEV }}
           
-          # Replace secret placeholders with actual values
+          # Replace secret placeholders with actual values or defaults
+          PROJECT_NAME="${{ secrets.PROJECT_NAME }}"
+          if [ -z "$PROJECT_NAME" ]; then
+            PROJECT_NAME="mlops-dev"
+          fi
+          
           LOCATION="${{ secrets.AZURE_LOCATION }}"
           if [ -z "$LOCATION" ]; then
             LOCATION="eastus"
           fi
           
-          sed -i "s/VAR_PROJECT_NAME/${{ secrets.PROJECT_NAME }}/g" terraform.tfvars
+          NOTIFICATION_EMAIL="${{ secrets.NOTIFICATION_EMAIL }}"
+          if [ -z "$NOTIFICATION_EMAIL" ]; then
+            NOTIFICATION_EMAIL="devops@example.com"
+          fi
+          
+          sed -i "s/VAR_PROJECT_NAME/$PROJECT_NAME/g" terraform.tfvars
           sed -i "s/VAR_AZURE_LOCATION/$LOCATION/g" terraform.tfvars
-          sed -i "s/VAR_NOTIFICATION_EMAIL/${{ secrets.NOTIFICATION_EMAIL }}/g" terraform.tfvars
+          sed -i "s/VAR_NOTIFICATION_EMAIL/$NOTIFICATION_EMAIL/g" terraform.tfvars
           
           echo "✅ Using environments/dev/terraform.tfvars with secrets injected"
 
@@ -187,15 +197,25 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR_PROD }}
           
-          # Replace secret placeholders with actual values
+          # Replace secret placeholders with actual values or defaults
+          PROJECT_NAME="${{ secrets.PROJECT_NAME }}"
+          if [ -z "$PROJECT_NAME" ]; then
+            PROJECT_NAME="mlops-prod"
+          fi
+          
           LOCATION="${{ secrets.AZURE_LOCATION }}"
           if [ -z "$LOCATION" ]; then
             LOCATION="eastus"
           fi
           
-          sed -i "s/VAR_PROJECT_NAME/${{ secrets.PROJECT_NAME }}/g" terraform.tfvars
+          NOTIFICATION_EMAIL="${{ secrets.NOTIFICATION_EMAIL }}"
+          if [ -z "$NOTIFICATION_EMAIL" ]; then
+            NOTIFICATION_EMAIL="devops@example.com"
+          fi
+          
+          sed -i "s/VAR_PROJECT_NAME/$PROJECT_NAME/g" terraform.tfvars
           sed -i "s/VAR_AZURE_LOCATION/$LOCATION/g" terraform.tfvars
-          sed -i "s/VAR_NOTIFICATION_EMAIL/${{ secrets.NOTIFICATION_EMAIL }}/g" terraform.tfvars
+          sed -i "s/VAR_NOTIFICATION_EMAIL/$NOTIFICATION_EMAIL/g" terraform.tfvars
           
           echo "✅ Using environments/prod/terraform.tfvars with secrets injected"
 
@@ -274,15 +294,25 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR_DEV }}
           
-          # Replace secret placeholders with actual values
+          # Replace secret placeholders with actual values or defaults
+          PROJECT_NAME="${{ secrets.PROJECT_NAME }}"
+          if [ -z "$PROJECT_NAME" ]; then
+            PROJECT_NAME="mlops-dev"
+          fi
+          
           LOCATION="${{ secrets.AZURE_LOCATION }}"
           if [ -z "$LOCATION" ]; then
             LOCATION="eastus"
           fi
           
-          sed -i "s/VAR_PROJECT_NAME/${{ secrets.PROJECT_NAME }}/g" terraform.tfvars
+          NOTIFICATION_EMAIL="${{ secrets.NOTIFICATION_EMAIL }}"
+          if [ -z "$NOTIFICATION_EMAIL" ]; then
+            NOTIFICATION_EMAIL="devops@example.com"
+          fi
+          
+          sed -i "s/VAR_PROJECT_NAME/$PROJECT_NAME/g" terraform.tfvars
           sed -i "s/VAR_AZURE_LOCATION/$LOCATION/g" terraform.tfvars
-          sed -i "s/VAR_NOTIFICATION_EMAIL/${{ secrets.NOTIFICATION_EMAIL }}/g" terraform.tfvars
+          sed -i "s/VAR_NOTIFICATION_EMAIL/$NOTIFICATION_EMAIL/g" terraform.tfvars
           
           echo "✅ Using environments/dev/terraform.tfvars (modular infrastructure)"
           echo "📦 Modules: networking, storage, ml-workspace, aks, rbac, cost-management"
@@ -559,15 +589,25 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR_PROD }}
           
-          # Replace secret placeholders with actual values
+          # Replace secret placeholders with actual values or defaults
+          PROJECT_NAME="${{ secrets.PROJECT_NAME }}"
+          if [ -z "$PROJECT_NAME" ]; then
+            PROJECT_NAME="mlops-prod"
+          fi
+          
           LOCATION="${{ secrets.AZURE_LOCATION }}"
           if [ -z "$LOCATION" ]; then
             LOCATION="eastus"
           fi
           
-          sed -i "s/VAR_PROJECT_NAME/${{ secrets.PROJECT_NAME }}/g" terraform.tfvars
+          NOTIFICATION_EMAIL="${{ secrets.NOTIFICATION_EMAIL }}"
+          if [ -z "$NOTIFICATION_EMAIL" ]; then
+            NOTIFICATION_EMAIL="devops@example.com"
+          fi
+          
+          sed -i "s/VAR_PROJECT_NAME/$PROJECT_NAME/g" terraform.tfvars
           sed -i "s/VAR_AZURE_LOCATION/$LOCATION/g" terraform.tfvars
-          sed -i "s/VAR_NOTIFICATION_EMAIL/${{ secrets.NOTIFICATION_EMAIL }}/g" terraform.tfvars
+          sed -i "s/VAR_NOTIFICATION_EMAIL/$NOTIFICATION_EMAIL/g" terraform.tfvars
           
           echo "✅ Using environments/prod/terraform.tfvars with secrets injected"
           cat terraform.tfvars
