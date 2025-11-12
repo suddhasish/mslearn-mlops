@@ -20,11 +20,19 @@ echo "=========================================="
 echo "Storage Account: $STORAGE_ACCOUNT"
 echo "Container: $CONTAINER_NAME"
 
-# Create container if it doesn't exist
+# Get storage account key
+echo "Getting storage account key..."
+STORAGE_KEY=$(az storage account keys list \
+  --account-name "$STORAGE_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --subscription "$SUBSCRIPTION_ID" \
+  --query "[0].value" -o tsv)
+
+# Create container if it doesn't exist (using account key)
 az storage container create \
   --name "$CONTAINER_NAME" \
   --account-name "$STORAGE_ACCOUNT" \
-  --auth-mode login \
+  --account-key "$STORAGE_KEY" \
   --only-show-errors || true
 
 echo "✅ Container created/verified"
@@ -48,13 +56,14 @@ echo "To: $CONTAINER_NAME/$BLOB_PATH"
 echo "Files to upload:"
 ls -lh "$LOCAL_DATA_PATH"
 
-# Upload data to blob storage
+# Upload data to blob storage (using account key)
 az storage blob upload-batch \
   --account-name "$STORAGE_ACCOUNT" \
+  --account-key "$STORAGE_KEY" \
   --destination "$CONTAINER_NAME" \
   --destination-path "$BLOB_PATH" \
   --source "$LOCAL_DATA_PATH" \
-  --auth-mode login \
+  --overwrite \
   --only-show-errors
 
 echo "✅ Data uploaded successfully"
