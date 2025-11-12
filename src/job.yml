@@ -19,7 +19,7 @@ outputs:
     #mode: rw_mount
     mode: upload
 environment: azureml:AzureML-sklearn-0.24-ubuntu18.04-py37-cpu@latest
-compute: amlcluster
+compute: cpu-cluster
 experiment_name: diabetic_ogistic_regression_training
 description: >-
   Train a LogisticRegression model on CSV files in `training_data`. 
