@@ -15,7 +15,7 @@ env:
   RESOURCE_GROUP: 'mlopsnew-dev-rg'
   ML_WORKSPACE: 'mlopsnew-dev-mlw'
   
-  # Training configuration
+  # Training configuration 
   JOB_YML: src/job.yml
   TRAINING_DATA: ${{ secrets.AZURE_ML_TRAINING_DATA_PATH || '' }}
   MODEL_NAME: diabetes_classification
