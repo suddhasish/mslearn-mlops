@@ -133,7 +133,7 @@ resource "azurerm_role_assignment" "ml_acr" {
 resource "azurerm_role_assignment" "ml_keyvault" {
   scope                = var.key_vault_id
   role_definition_name = "Key Vault Secrets User"
-  depends_on = [azurerm_role_definition.mlops_data_scientist, azurerm_role_definition.mlops_engineer, azurerm_role_definition.mlops_viewer]
+  depends_on           = [azurerm_role_definition.mlops_data_scientist, azurerm_role_definition.mlops_engineer, azurerm_role_definition.mlops_viewer]
 }
 
 # Note: AKS to ACR role assignment is handled in the AKS module to avoid duplication
