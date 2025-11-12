@@ -1,55 +1,24 @@
 name: CD - MLOps Blue/Green Deployment with Approval
 
-# This workflow uses Terraform-deployed infrastructure
-# DEV Environment: mlopsnew-dev-* resources
-# PROD Environment: mlopsnew-prod-* resources
+# This workflow uses Terraform-deployed DEV infrastructure
+# Both staging and production endpoints are deployed in DEV environment
+# - Staging endpoint: ml-endpoint-staging (for testing)
+# - Production endpoint: ml-endpoint-production (for blue/green deployment)
 # 
-# Infrastructure is managed in: infrastructure/environments/{dev,prod}
+# Infrastructure: mlopsnew-dev-* resources (deployed via Terraform)
 # See INFRASTRUCTURE_INTEGRATION.md for details
 
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Target environment'
-        required: true
-        type: choice
-        options:
-          - dev
-          - prod
-        default: 'dev'
       model_name:
         description: 'Model name to deploy'
         required: true
         default: 'diabetes-classifier'
       model_version:
-        description: 'Model version or tag'
+        description: 'Model version (e.g., 1, 2, latest)'
         required: true
         default: 'latest'
-      staging_instance_type:
-        description: 'Staging VM instance type'
-        required: false
-        default: 'Standard_DS2_v2'
-      staging_instance_count:
-        description: 'Staging instance count'
-        required: false
-        default: '1'
-      prod_instance_type:
-        description: 'Production VM instance type'
-        required: false
-        default: 'Standard_DS3_v2'
-      prod_instance_count:
-        description: 'Production instance count'
-        required: false
-        default: '2'
-      skip_staging_tests:
-        description: 'Skip staging tests (not recommended)'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
   repository_dispatch:
     types: [aml_model_registered]
 
@@ -60,28 +29,28 @@ concurrency:
 
 env:
   PYTHON_VERSION: '3.11'
+  
+  # Infrastructure (Terraform-deployed DEV environment)
+  # Note: Both staging and production use DEV infrastructure
   AZURE_SUBSCRIPTION_ID: 'b2b8a5e6-9a34-494b-ba62-fe9be95bd398'
+  RESOURCE_GROUP: 'mlopsnew-dev-rg'
+  ML_WORKSPACE: 'mlopsnew-dev-mlw'
+  CONTAINER_REGISTRY: 'mlopsnewdevacr3kxldb.azurecr.io'
+  AKS_CLUSTER: 'mlopsnew-dev-aks'
+  KEY_VAULT: 'mlopsnew-dev-kv-3kxldb'
+  STORAGE_ACCOUNT: 'mlopsnewdevst3kxldb'
   
-  # DEV Environment (deployed via Terraform)
-  DEV_RESOURCE_GROUP: 'mlopsnew-dev-rg'
-  DEV_ML_WORKSPACE: 'mlopsnew-dev-mlw'
-  DEV_CONTAINER_REGISTRY: 'mlopsnewdevacr3kxldb.azurecr.io'
-  DEV_AKS_CLUSTER: 'mlopsnew-dev-aks'
-  DEV_KEY_VAULT: 'mlopsnew-dev-kv-3kxldb'
-  
-  # PROD Environment (to be deployed via Terraform)
-  PROD_RESOURCE_GROUP: 'mlopsnew-prod-rg'
-  PROD_ML_WORKSPACE: 'mlopsnew-prod-mlw'
-  PROD_CONTAINER_REGISTRY: 'mlopsnewprodacr.azurecr.io'
-  PROD_AKS_CLUSTER: 'mlopsnew-prod-aks'
-  PROD_KEY_VAULT: 'mlopsnew-prod-kv'
-  
-  # Endpoint names
+  # Endpoint configuration
+  # Staging endpoint: For initial testing and validation
   AZURE_ML_STAGING_ENDPOINT_NAME: ml-endpoint-staging
-  AZURE_ML_PRODUCTION_ENDPOINT_NAME: ml-endpoint-production
   STAGING_DEPLOYMENT_NAME: staging-deployment
+  
+  # Production endpoint: For blue/green deployment with gradual rollout
+  AZURE_ML_PRODUCTION_ENDPOINT_NAME: ml-endpoint-production
   PROD_BLUE_DEPLOYMENT_NAME: blue-deployment
   PROD_GREEN_DEPLOYMENT_NAME: green-deployment
+  
+  # Deployment configuration
   MAX_WAIT_ITERATIONS: 30
   WAIT_INTERVAL_SECONDS: 10
 
@@ -91,7 +60,6 @@ jobs:
     name: Resolve Deployment Inputs
     runs-on: ubuntu-latest
     outputs:
-      environment: ${{ steps.resolve.outputs.environment }}
       model_name: ${{ steps.resolve.outputs.model_name }}
       model_version: ${{ steps.resolve.outputs.model_version }}
       aml_workspace: ${{ steps.resolve.outputs.aml_workspace }}
@@ -100,11 +68,6 @@ jobs:
       container_registry: ${{ steps.resolve.outputs.container_registry }}
       aks_cluster: ${{ steps.resolve.outputs.aks_cluster }}
       key_vault: ${{ steps.resolve.outputs.key_vault }}
-      staging_instance_type: ${{ steps.resolve.outputs.staging_instance_type }}
-      staging_instance_count: ${{ steps.resolve.outputs.staging_instance_count }}
-      prod_instance_type: ${{ steps.resolve.outputs.prod_instance_type }}
-      prod_instance_count: ${{ steps.resolve.outputs.prod_instance_count }}
-      skip_staging_tests: ${{ steps.resolve.outputs.skip_staging_tests }}
       deployment_id: ${{ steps.resolve.outputs.deployment_id }}
     steps:
       - name: Generate deployment ID
@@ -114,48 +77,22 @@ jobs:
       - name: Resolve all inputs
         id: resolve
         run: |
-          # Determine environment
-          ENV="${{ github.event.inputs.environment || github.event.client_payload.environment || 'dev' }}"
-          echo "environment=$ENV" >> $GITHUB_OUTPUT
-          
-          # Set environment-specific infrastructure values
-          if [ "$ENV" = "prod" ]; then
-            RG="${{ env.PROD_RESOURCE_GROUP }}"
-            WS="${{ env.PROD_ML_WORKSPACE }}"
-            ACR="${{ env.PROD_CONTAINER_REGISTRY }}"
-            AKS="${{ env.PROD_AKS_CLUSTER }}"
-            KV="${{ env.PROD_KEY_VAULT }}"
-          else
-            RG="${{ env.DEV_RESOURCE_GROUP }}"
-            WS="${{ env.DEV_ML_WORKSPACE }}"
-            ACR="${{ env.DEV_CONTAINER_REGISTRY }}"
-            AKS="${{ env.DEV_AKS_CLUSTER }}"
-            KV="${{ env.DEV_KEY_VAULT }}"
-          fi
-          
-          # Core inputs - use Terraform-deployed infrastructure
+          # Use DEV infrastructure (Terraform-deployed)
           echo "model_name=${{ github.event.inputs.model_name || github.event.client_payload.model_name || 'diabetes-classifier' }}" >> $GITHUB_OUTPUT
           echo "model_version=${{ github.event.inputs.model_version || github.event.client_payload.model_version || 'latest' }}" >> $GITHUB_OUTPUT
-          echo "aml_workspace=$WS" >> $GITHUB_OUTPUT
-          echo "resource_group=$RG" >> $GITHUB_OUTPUT
+          echo "aml_workspace=${{ env.ML_WORKSPACE }}" >> $GITHUB_OUTPUT
+          echo "resource_group=${{ env.RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "subscription_id=${{ env.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_OUTPUT
-          echo "container_registry=$ACR" >> $GITHUB_OUTPUT
-          echo "aks_cluster=$AKS" >> $GITHUB_OUTPUT
-          echo "key_vault=$KV" >> $GITHUB_OUTPUT
-          
-          # Configuration inputs
-          echo "staging_instance_type=${{ github.event.inputs.staging_instance_type || 'Standard_DS2_v2' }}" >> $GITHUB_OUTPUT
-          echo "staging_instance_count=${{ github.event.inputs.staging_instance_count || '1' }}" >> $GITHUB_OUTPUT
-          echo "prod_instance_type=${{ github.event.inputs.prod_instance_type || 'Standard_DS3_v2' }}" >> $GITHUB_OUTPUT
-          echo "prod_instance_count=${{ github.event.inputs.prod_instance_count || '2' }}" >> $GITHUB_OUTPUT
-          echo "skip_staging_tests=${{ github.event.inputs.skip_staging_tests || 'false' }}" >> $GITHUB_OUTPUT
+          echo "container_registry=${{ env.CONTAINER_REGISTRY }}" >> $GITHUB_OUTPUT
+          echo "aks_cluster=${{ env.AKS_CLUSTER }}" >> $GITHUB_OUTPUT
+          echo "key_vault=${{ env.KEY_VAULT }}" >> $GITHUB_OUTPUT
           echo "deployment_id=${{ steps.deployment_id.outputs.id }}" >> $GITHUB_OUTPUT
 
       - name: Display infrastructure configuration
         run: |
           echo "### 🏗️ Infrastructure Configuration" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment**: ${{ steps.resolve.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Using DEV Infrastructure** (Staging and Production endpoints in same workspace)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -165,6 +102,10 @@ jobs:
           echo "| AKS Cluster | ${{ steps.resolve.outputs.aks_cluster }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Key Vault | ${{ steps.resolve.outputs.key_vault }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Subscription | ${{ steps.resolve.outputs.subscription_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Endpoints:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Staging: `${{ env.AZURE_ML_STAGING_ENDPOINT_NAME }}`" >> $GITHUB_STEP_SUMMARY
+          echo "- Production: `${{ env.AZURE_ML_PRODUCTION_ENDPOINT_NAME }}`" >> $GITHUB_STEP_SUMMARY
 
       - name: Log deployment configuration
         run: |
@@ -174,11 +115,8 @@ jobs:
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Model Name | ${{ steps.resolve.outputs.model_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Model Version | ${{ steps.resolve.outputs.model_version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Workspace | ${{ steps.resolve.outputs.aml_workspace }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Resource Group | ${{ steps.resolve.outputs.resource_group }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Staging Instance | ${{ steps.resolve.outputs.staging_instance_type }} (x${{ steps.resolve.outputs.staging_instance_count }}) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Production Instance | ${{ steps.resolve.outputs.prod_instance_type }} (x${{ steps.resolve.outputs.prod_instance_count }}) |" >> $GITHUB_STEP_SUMMARY
           echo "| Deployment ID | ${{ steps.resolve.outputs.deployment_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Infrastructure | DEV (simulating prod) |" >> $GITHUB_STEP_SUMMARY
 
   deploy-staging:
     name: Deploy to Staging Environment
@@ -270,8 +208,8 @@ jobs:
             --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
             --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
             --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
-            --instance-type "${{ needs.resolve-inputs.outputs.staging_instance_type }}" \
-            --instance-count "${{ needs.resolve-inputs.outputs.staging_instance_count }}" \
+            --instance-type Standard_DS2_v2 \
+            --instance-count 1 \
             --all-traffic \
             --set environment_variables.DEPLOYMENT_ID="${{ needs.resolve-inputs.outputs.deployment_id }}" \
             --set environment_variables.MODEL_VERSION="${{ needs.resolve-inputs.outputs.model_version }}" \
@@ -351,7 +289,6 @@ jobs:
           echo "✓ Staging endpoint URL: $ENDPOINT_URL"
 
       - name: Run staging endpoint tests
-        if: needs.resolve-inputs.outputs.skip_staging_tests != 'true'
         env:
           ENDPOINT_URL: ${{ steps.get_endpoint.outputs.ENDPOINT_URL }}
           ENDPOINT_KEY: ${{ steps.get_endpoint.outputs.ENDPOINT_KEY }}
@@ -394,7 +331,8 @@ jobs:
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Model**: ${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Instance**: ${{ needs.resolve-inputs.outputs.staging_instance_type }} (x${{ needs.resolve-inputs.outputs.staging_instance_count }})" >> $GITHUB_STEP_SUMMARY
+          echo "**Instance**: Standard_DS2_v2 (x1)" >> $GITHUB_STEP_SUMMARY
+          echo "**Infrastructure**: DEV (mlopsnew-dev-rg)" >> $GITHUB_STEP_SUMMARY
 
   prepare-production:
     name: Prepare Production Blue/Green Deployment
@@ -499,8 +437,8 @@ jobs:
             --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
             --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
             --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
-            --instance-type "${{ needs.resolve-inputs.outputs.prod_instance_type }}" \
-            --instance-count "${{ needs.resolve-inputs.outputs.prod_instance_count }}" \
+            --instance-type Standard_DS3_v2 \
+            --instance-count 2 \
             --all-traffic \
             --set environment_variables.DEPLOYMENT_ID="${{ needs.resolve-inputs.outputs.deployment_id }}" \
             --set environment_variables.MODEL_VERSION="${{ needs.resolve-inputs.outputs.model_version }}" \
@@ -527,7 +465,7 @@ jobs:
             --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
             --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
             --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
-            --instance-type "${{ needs.resolve-inputs.outputs.prod_instance_type }}" \
+            --instance-type Standard_DS3_v2 \
             --instance-count 1 \
             --set environment_variables.DEPLOYMENT_ID="${{ needs.resolve-inputs.outputs.deployment_id }}" \
             --set environment_variables.MODEL_VERSION="${{ needs.resolve-inputs.outputs.model_version }}" \
@@ -954,8 +892,9 @@ jobs:
           echo "| Deployment ID | ${{ needs.resolve-inputs.outputs.deployment_id }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Deployed By | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Workflow Run | [${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Instance Type | ${{ needs.resolve-inputs.outputs.prod_instance_type }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Instance Count | ${{ needs.resolve-inputs.outputs.prod_instance_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Infrastructure | DEV (mlopsnew-dev-*) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Instance Type | Standard_DS3_v2 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Instance Count | 2 (Blue/Green deployments) |" >> $GITHUB_STEP_SUMMARY
 
       - name: Notify deployment success
         if: always()
