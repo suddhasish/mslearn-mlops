@@ -11,7 +11,7 @@ STORAGE_ACCOUNT="mlopsnewdevst3kxldb"
 CONTAINER_NAME="training-data"
 BLOB_PATH="diabetes"
 DATA_NAME="diabetes-dev-folder"
-DATA_VERSION="1"
+DATA_VERSION="$(date +%Y%m%d%H%M%S)"  # Use timestamp for unique version
 LOCAL_DATA_PATH="production/data"
 
 echo "=========================================="
