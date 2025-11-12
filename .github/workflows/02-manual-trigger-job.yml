@@ -22,9 +22,31 @@ env:
   PRIMARY_METRIC: f1
 
 jobs:
+  create-data-asset:
+    name: Create/Update Training Data Asset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install Azure ML CLI extension
+        run: |
+          az extension add --name ml --yes --upgrade
+
+      - name: Create data asset from blob storage
+        run: |
+          chmod +x scripts/create-data-asset.sh
+          bash scripts/create-data-asset.sh
+
   lint:
     name: Flake8 lint
     runs-on: ubuntu-latest
+    needs: create-data-asset
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
@@ -84,7 +106,7 @@ jobs:
   submit-aml-job:
     name: Submit & monitor AML job, download outputs, compare metrics
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [create-data-asset, lint, test]
     outputs:
       job_id: ${{ steps.submit_job.outputs.job_id }}
       improved: ${{ steps.set_improved.outputs.improved }}

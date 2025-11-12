@@ -1,0 +1,436 @@
+# Updated ML Training Pipeline - Integrated with Terraform Infrastructure
+#
+# This workflow uses GitHub variables populated by the infrastructure pipeline
+# to dynamically connect to the provisioned Azure ML workspace
+
+name: ML Training Pipeline (Terraform-Integrated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment (dev/prod)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: 'dev'
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  MODEL_NAME: diabetes_classification
+  PRIMARY_METRIC: f1
+  JOB_YML: src/job.yml
+
+jobs:
+  # Resolve infrastructure based on target environment
+  resolve-infrastructure:
+    name: Resolve Infrastructure Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      resource_group: ${{ steps.resolve.outputs.resource_group }}
+      ml_workspace: ${{ steps.resolve.outputs.ml_workspace }}
+      storage_account: ${{ steps.resolve.outputs.storage_account }}
+      subscription_id: ${{ steps.resolve.outputs.subscription_id }}
+      acr_name: ${{ steps.resolve.outputs.acr_name }}
+      key_vault: ${{ steps.resolve.outputs.key_vault }}
+      environment: ${{ steps.resolve.outputs.environment }}
+    steps:
+      - name: Determine environment
+        id: determine_env
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          else
+            echo "environment=${{ github.event.inputs.environment || 'dev' }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Resolve infrastructure from Terraform outputs
+        id: resolve
+        run: |
+          ENV="${{ steps.determine_env.outputs.environment }}"
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          
+          if [ "$ENV" = "prod" ]; then
+            echo "resource_group=${{ vars.PROD_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+            echo "ml_workspace=${{ vars.PROD_ML_WORKSPACE }}" >> $GITHUB_OUTPUT
+            echo "storage_account=${{ vars.PROD_STORAGE_ACCOUNT }}" >> $GITHUB_OUTPUT
+            echo "acr_name=${{ vars.PROD_ACR_NAME }}" >> $GITHUB_OUTPUT
+            echo "key_vault=${{ vars.PROD_KEY_VAULT }}" >> $GITHUB_OUTPUT
+          else
+            echo "resource_group=${{ vars.DEV_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+            echo "ml_workspace=${{ vars.DEV_ML_WORKSPACE }}" >> $GITHUB_OUTPUT
+            echo "storage_account=${{ vars.DEV_STORAGE_ACCOUNT }}" >> $GITHUB_OUTPUT
+            echo "acr_name=${{ vars.DEV_ACR_NAME }}" >> $GITHUB_OUTPUT
+            echo "key_vault=${{ vars.DEV_KEY_VAULT }}" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_OUTPUT
+
+      - name: Display infrastructure configuration
+        run: |
+          echo "## 🔧 Infrastructure Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ steps.resolve.outputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | ${{ steps.resolve.outputs.resource_group }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ML Workspace | ${{ steps.resolve.outputs.ml_workspace }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Storage Account | ${{ steps.resolve.outputs.storage_account }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Registry | ${{ steps.resolve.outputs.acr_name }} |" >> $GITHUB_STEP_SUMMARY
+
+  # Code quality checks
+  lint:
+    name: Code Quality - Linting
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort pylint
+
+      - name: Run flake8
+        run: flake8 src/ tests/ --max-line-length=120 --exclude=__pycache__
+
+      - name: Run black (check only)
+        run: black --check src/ tests/
+
+      - name: Run isort (check only)
+        run: isort --check-only src/ tests/
+
+  # Unit tests
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ -v --cov=src --cov-report=xml --cov-report=html --cov-report=term
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.xml
+            htmlcov/
+
+  # Verify infrastructure connectivity
+  verify-infrastructure:
+    name: Verify Infrastructure Access
+    needs: resolve-infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install Azure ML CLI
+        run: |
+          az extension add -n ml --version 2.22.0 || az extension update -n ml
+
+      - name: Verify ML Workspace access
+        run: |
+          echo "Verifying access to ML Workspace..."
+          az ml workspace show \
+            --name "${{ needs.resolve-infrastructure.outputs.ml_workspace }}" \
+            --resource-group "${{ needs.resolve-infrastructure.outputs.resource_group }}" \
+            --subscription "${{ needs.resolve-infrastructure.outputs.subscription_id }}"
+
+      - name: Verify Storage Account access
+        run: |
+          echo "Verifying storage account access..."
+          az storage account show \
+            --name "${{ needs.resolve-infrastructure.outputs.storage_account }}" \
+            --resource-group "${{ needs.resolve-infrastructure.outputs.resource_group }}"
+
+      - name: List available compute targets
+        run: |
+          echo "Listing available compute targets..."
+          az ml compute list \
+            --workspace-name "${{ needs.resolve-infrastructure.outputs.ml_workspace }}" \
+            --resource-group "${{ needs.resolve-infrastructure.outputs.resource_group }}"
+
+  # Submit training job
+  submit-training-job:
+    name: Submit ML Training Job
+    needs: [resolve-infrastructure, verify-infrastructure]
+    if: github.event_name != 'pull_request' || needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      job_id: ${{ steps.submit.outputs.job_id }}
+      job_url: ${{ steps.submit.outputs.job_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install Azure ML CLI
+        run: |
+          az extension add -n ml --version 2.22.0 || az extension update -n ml
+
+      - name: Upload training data to storage
+        run: |
+          echo "Uploading training data..."
+          az storage blob upload-batch \
+            --account-name "${{ needs.resolve-infrastructure.outputs.storage_account }}" \
+            --destination data \
+            --source ./production/data \
+            --auth-mode login \
+            --overwrite
+
+      - name: Submit training job
+        id: submit
+        run: |
+          echo "Submitting training job to Azure ML..."
+          
+          JOB_OUTPUT=$(az ml job create \
+            --file "${{ env.JOB_YML }}" \
+            --workspace-name "${{ needs.resolve-infrastructure.outputs.ml_workspace }}" \
+            --resource-group "${{ needs.resolve-infrastructure.outputs.resource_group }}" \
+            --subscription "${{ needs.resolve-infrastructure.outputs.subscription_id }}" \
+            --set experiment_name="${{ env.MODEL_NAME }}-training" \
+            --set display_name="Training Run - ${{ github.sha }}" \
+            --output json)
+          
+          JOB_ID=$(echo "$JOB_OUTPUT" | jq -r '.name')
+          WORKSPACE_NAME="${{ needs.resolve-infrastructure.outputs.ml_workspace }}"
+          
+          echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+          echo "job_url=https://ml.azure.com/runs/$JOB_ID?wsid=/subscriptions/${{ needs.resolve-infrastructure.outputs.subscription_id }}/resourcegroups/${{ needs.resolve-infrastructure.outputs.resource_group }}/workspaces/$WORKSPACE_NAME" >> $GITHUB_OUTPUT
+          
+          echo "## 🚀 Training Job Submitted" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Job ID**: \`$JOB_ID\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workspace**: $WORKSPACE_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ needs.resolve-infrastructure.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **View in Portal**: [Open Azure ML Studio](https://ml.azure.com/runs/$JOB_ID)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Monitor job progress
+        run: |
+          JOB_ID="${{ steps.submit.outputs.job_id }}"
+          echo "Monitoring job: $JOB_ID"
+          
+          while true; do
+            STATUS=$(az ml job show \
+              --name "$JOB_ID" \
+              --workspace-name "${{ needs.resolve-infrastructure.outputs.ml_workspace }}" \
+              --resource-group "${{ needs.resolve-infrastructure.outputs.resource_group }}" \
+              --query "status" -o tsv)
+            
+            echo "Job status: $STATUS"
+            
+            case "$STATUS" in
+              "Completed")
+                echo "✅ Job completed successfully"
+                exit 0
+                ;;
+              "Failed"|"Canceled")
+                echo "❌ Job $STATUS"
+                exit 1
+                ;;
+              "Running"|"Queued"|"Preparing"|"Starting"|"Provisioning")
+                echo "⏳ Job in progress..."
+                sleep 60
+                ;;
+              *)
+                echo "Unknown status: $STATUS"
+                sleep 30
+                ;;
+            esac
+          done
+
+      - name: Download job outputs
+        run: |
+          JOB_ID="${{ steps.submit.outputs.job_id }}"
+          echo "Downloading job outputs..."
+          
+          mkdir -p job_outputs
+          
+          az ml job download \
+            --name "$JOB_ID" \
+            --download-path job_outputs \
+            --all \
+            --workspace-name "${{ needs.resolve-infrastructure.outputs.ml_workspace }}" \
+            --resource-group "${{ needs.resolve-infrastructure.outputs.resource_group }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-outputs-${{ needs.resolve-infrastructure.outputs.environment }}
+          path: job_outputs/
+
+  # Compare metrics with previous runs
+  evaluate-model:
+    name: Evaluate Model Performance
+    needs: [resolve-infrastructure, submit-training-job]
+    runs-on: ubuntu-latest
+    outputs:
+      improved: ${{ steps.compare.outputs.improved }}
+      current_metric: ${{ steps.compare.outputs.current_metric }}
+      baseline_metric: ${{ steps.compare.outputs.baseline_metric }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download training outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: training-outputs-${{ needs.resolve-infrastructure.outputs.environment }}
+          path: job_outputs/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install azure-ai-ml azure-identity
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Compare metrics
+        id: compare
+        run: |
+          python src/compare_metrics.py \
+            --model_dir job_outputs \
+            --model_name "${{ env.MODEL_NAME }}" \
+            --primary_metric "${{ env.PRIMARY_METRIC }}" \
+            --subscription_id "${{ needs.resolve-infrastructure.outputs.subscription_id }}" \
+            --resource_group "${{ needs.resolve-infrastructure.outputs.resource_group }}" \
+            --workspace "${{ needs.resolve-infrastructure.outputs.ml_workspace }}"
+          
+          # Read outputs
+          if [ -f improved.txt ]; then
+            IMPROVED=$(cat improved.txt)
+            echo "improved=$IMPROVED" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -f current_metric.txt ]; then
+            CURRENT=$(cat current_metric.txt)
+            echo "current_metric=$CURRENT" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -f baseline_metric.txt ]; then
+            BASELINE=$(cat baseline_metric.txt)
+            echo "baseline_metric=$BASELINE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update summary
+        run: |
+          echo "## 📊 Model Evaluation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Primary Metric | ${{ env.PRIMARY_METRIC }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Current Score | ${{ steps.compare.outputs.current_metric }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Baseline Score | ${{ steps.compare.outputs.baseline_metric }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Improved | ${{ steps.compare.outputs.improved }} |" >> $GITHUB_STEP_SUMMARY
+
+  # Manual approval for model registration
+  approval:
+    name: Approve Model Registration
+    needs: [evaluate-model, resolve-infrastructure]
+    if: needs.evaluate-model.outputs.improved == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: model-registration-${{ needs.resolve-infrastructure.outputs.environment }}
+    steps:
+      - name: Approval gate
+        run: |
+          echo "✅ Model improvement confirmed"
+          echo "📋 Manual approval required for registration"
+          echo "Environment: ${{ needs.resolve-infrastructure.outputs.environment }}"
+
+  # Register approved model
+  register-model:
+    name: Register Model
+    needs: [resolve-infrastructure, evaluate-model, approval]
+    if: needs.evaluate-model.outputs.improved == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download training outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: training-outputs-${{ needs.resolve-infrastructure.outputs.environment }}
+          path: job_outputs/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install azure-ai-ml azure-identity mlflow
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Register model
+        run: |
+          python src/register_local.py \
+            --model_dir job_outputs \
+            --model_name "${{ env.MODEL_NAME }}" \
+            --primary_metric "${{ env.PRIMARY_METRIC }}" \
+            --subscription_id "${{ needs.resolve-infrastructure.outputs.subscription_id }}" \
+            --resource_group "${{ needs.resolve-infrastructure.outputs.resource_group }}" \
+            --workspace "${{ needs.resolve-infrastructure.outputs.ml_workspace }}"
+
+      - name: Create deployment summary
+        run: |
+          echo "## ✅ Model Registered Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Model Name**: ${{ env.MODEL_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ needs.resolve-infrastructure.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workspace**: ${{ needs.resolve-infrastructure.outputs.ml_workspace }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Metric (${{ env.PRIMARY_METRIC }})**: ${{ needs.evaluate-model.outputs.current_metric }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🚀 Model ready for deployment!"

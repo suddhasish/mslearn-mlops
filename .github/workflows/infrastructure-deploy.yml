@@ -808,3 +808,132 @@ jobs:
           echo "| Storage Account | $(jq -r '.storage_account_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
           echo "| Container Registry | $(jq -r '.container_registry_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
           echo "| Key Vault | $(jq -r '.key_vault_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
+
+  # Export infrastructure outputs as GitHub Variables for ML pipelines
+  export-dev-outputs:
+    name: Export DEV Outputs to GitHub Variables
+    needs: dev-apply
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/deployment-pipeline')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.WORKING_DIR_DEV }}
+        run: terraform init
+
+      - name: Extract DEV Outputs
+        id: dev_outputs
+        working-directory: ${{ env.WORKING_DIR_DEV }}
+        run: |
+          echo "resource_group=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "ml_workspace=$(terraform output -raw ml_workspace_name)" >> $GITHUB_OUTPUT
+          echo "aks_cluster=$(terraform output -raw aks_cluster_name)" >> $GITHUB_OUTPUT
+          echo "acr_name=$(terraform output -raw container_registry_name)" >> $GITHUB_OUTPUT
+          echo "acr_login_server=$(terraform output -raw container_registry_login_server)" >> $GITHUB_OUTPUT
+          echo "storage_account=$(terraform output -raw storage_account_name)" >> $GITHUB_OUTPUT
+          echo "key_vault=$(terraform output -raw key_vault_name)" >> $GITHUB_OUTPUT
+          echo "app_insights=$(terraform output -raw application_insights_name)" >> $GITHUB_OUTPUT
+
+      - name: Set GitHub Variables for DEV
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh variable set DEV_RESOURCE_GROUP --body "${{ steps.dev_outputs.outputs.resource_group }}"
+          gh variable set DEV_ML_WORKSPACE --body "${{ steps.dev_outputs.outputs.ml_workspace }}"
+          gh variable set DEV_AKS_CLUSTER --body "${{ steps.dev_outputs.outputs.aks_cluster }}"
+          gh variable set DEV_ACR_NAME --body "${{ steps.dev_outputs.outputs.acr_name }}"
+          gh variable set DEV_ACR_LOGIN_SERVER --body "${{ steps.dev_outputs.outputs.acr_login_server }}"
+          gh variable set DEV_STORAGE_ACCOUNT --body "${{ steps.dev_outputs.outputs.storage_account }}"
+          gh variable set DEV_KEY_VAULT --body "${{ steps.dev_outputs.outputs.key_vault }}"
+          gh variable set DEV_APP_INSIGHTS --body "${{ steps.dev_outputs.outputs.app_insights }}"
+          gh variable set AZURE_SUBSCRIPTION_ID --body "b2b8a5e6-9a34-494b-ba62-fe9be95bd398"
+          gh variable set AZURE_REGION --body "eastus"
+
+      - name: Output Summary
+        run: |
+          echo "## ✅ DEV Infrastructure Variables Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The following GitHub variables have been set for ML pipelines:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- DEV_RESOURCE_GROUP: ${{ steps.dev_outputs.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- DEV_ML_WORKSPACE: ${{ steps.dev_outputs.outputs.ml_workspace }}" >> $GITHUB_STEP_SUMMARY
+          echo "- DEV_AKS_CLUSTER: ${{ steps.dev_outputs.outputs.aks_cluster }}" >> $GITHUB_STEP_SUMMARY
+          echo "- DEV_ACR_NAME: ${{ steps.dev_outputs.outputs.acr_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✨ ML pipelines can now reference these via \`vars.DEV_RESOURCE_GROUP\`, etc." >> $GITHUB_STEP_SUMMARY
+
+  export-prod-outputs:
+    name: Export PROD Outputs to GitHub Variables
+    needs: prod-apply
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/deployment-pipeline')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.WORKING_DIR_PROD }}
+        run: terraform init
+
+      - name: Extract PROD Outputs
+        id: prod_outputs
+        working-directory: ${{ env.WORKING_DIR_PROD }}
+        run: |
+          echo "resource_group=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "ml_workspace=$(terraform output -raw ml_workspace_name)" >> $GITHUB_OUTPUT
+          echo "aks_cluster=$(terraform output -raw aks_cluster_name)" >> $GITHUB_OUTPUT
+          echo "acr_name=$(terraform output -raw container_registry_name)" >> $GITHUB_OUTPUT
+          echo "acr_login_server=$(terraform output -raw container_registry_login_server)" >> $GITHUB_OUTPUT
+          echo "storage_account=$(terraform output -raw storage_account_name)" >> $GITHUB_OUTPUT
+          echo "key_vault=$(terraform output -raw key_vault_name)" >> $GITHUB_OUTPUT
+          echo "app_insights=$(terraform output -raw application_insights_name)" >> $GITHUB_OUTPUT
+
+      - name: Set GitHub Variables for PROD
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh variable set PROD_RESOURCE_GROUP --body "${{ steps.prod_outputs.outputs.resource_group }}"
+          gh variable set PROD_ML_WORKSPACE --body "${{ steps.prod_outputs.outputs.ml_workspace }}"
+          gh variable set PROD_AKS_CLUSTER --body "${{ steps.prod_outputs.outputs.aks_cluster }}"
+          gh variable set PROD_ACR_NAME --body "${{ steps.prod_outputs.outputs.acr_name }}"
+          gh variable set PROD_ACR_LOGIN_SERVER --body "${{ steps.prod_outputs.outputs.acr_login_server }}"
+          gh variable set PROD_STORAGE_ACCOUNT --body "${{ steps.prod_outputs.outputs.storage_account }}"
+          gh variable set PROD_KEY_VAULT --body "${{ steps.prod_outputs.outputs.key_vault }}"
+          gh variable set PROD_APP_INSIGHTS --body "${{ steps.prod_outputs.outputs.app_insights }}"
+
+      - name: Output Summary
+        run: |
+          echo "## ✅ PROD Infrastructure Variables Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The following GitHub variables have been set for ML pipelines:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- PROD_RESOURCE_GROUP: ${{ steps.prod_outputs.outputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- PROD_ML_WORKSPACE: ${{ steps.prod_outputs.outputs.ml_workspace }}" >> $GITHUB_STEP_SUMMARY
+          echo "- PROD_AKS_CLUSTER: ${{ steps.prod_outputs.outputs.aks_cluster }}" >> $GITHUB_STEP_SUMMARY
+          echo "- PROD_ACR_NAME: ${{ steps.prod_outputs.outputs.acr_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✨ ML pipelines can now reference these via \`vars.PROD_RESOURCE_GROUP\`, etc." >> $GITHUB_STEP_SUMMARY
