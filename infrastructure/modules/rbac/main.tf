@@ -133,7 +133,7 @@ resource "azurerm_role_assignment" "ml_acr" {
 resource "azurerm_role_assignment" "ml_keyvault" {
   scope                = var.key_vault_id
   role_definition_name = "Key Vault Secrets User"
-  principal_id         = azurerm_user_assigned_identity.ml.principal_id
+  principal_id         = azurerm_user_assigned_identity.ml_workspace.principal_id
   depends_on           = [azurerm_role_definition.mlops_data_scientist, azurerm_role_definition.mlops_engineer, azurerm_role_definition.mlops_viewer]
 }
 
