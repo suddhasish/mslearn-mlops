@@ -133,23 +133,10 @@ resource "azurerm_role_assignment" "ml_acr" {
 resource "azurerm_role_assignment" "ml_keyvault" {
   scope                = var.key_vault_id
   role_definition_name = "Key Vault Secrets User"
-  principal_id         = azurerm_user_assigned_identity.ml_workspace.principal_id
+  depends_on = [azurerm_role_definition.mlops_data_scientist, azurerm_role_definition.mlops_engineer, azurerm_role_definition.mlops_viewer]
 }
 
-# Grant AKS access to ACR
-resource "azurerm_role_assignment" "aks_acr" {
-  count                = var.enable_aks_deployment ? 1 : 0
-  scope                = var.container_registry_id
-  role_definition_name = "AcrPull"
-  principal_id         = data.azurerm_kubernetes_cluster.aks[0].kubelet_identity[0].object_id
-}
-
-# Data source for AKS cluster (if needed)
-data "azurerm_kubernetes_cluster" "aks" {
-  count               = var.enable_aks_deployment ? 1 : 0
-  name                = split("/", var.aks_cluster_id)[8]
-  resource_group_name = basename(var.resource_group_id)
-}
+# Note: AKS to ACR role assignment is handled in the AKS module to avoid duplication
 
 # Grant ML Workspace system identity Key Vault Secrets Officer for RBAC
 resource "azurerm_role_assignment" "ml_workspace_kv_secrets_officer" {

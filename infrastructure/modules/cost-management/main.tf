@@ -58,10 +58,12 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "underutilization" {
       | where ObjectName == "Processor" and CounterName == "% Processor Time"
       | summarize AvgCPU = avg(CounterValue) by Computer
       | where AvgCPU < 20
+      | project Computer, AvgCPU
     QUERY
     time_aggregation_method = "Average"
     threshold               = 1
     operator                = "GreaterThanOrEqual"
+    metric_measure_column   = "AvgCPU"
 
     failing_periods {
       minimum_failing_periods_to_trigger_alert = 1
