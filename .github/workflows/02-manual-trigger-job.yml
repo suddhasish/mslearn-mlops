@@ -10,9 +10,14 @@ permissions:
   id-token: write
 
 env:
-  AZURE_ML_RESOURCE_GROUP: ${{ secrets.AZURE_ML_RESOURCE_GROUP }}
-  AZURE_ML_WORKSPACE_NAME: ${{ secrets.AZURE_ML_WORKSPACE_NAME }}
-  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  PYTHON_VERSION: '3.11'
+  
+  # Infrastructure (Terraform-deployed DEV environment)
+  AZURE_SUBSCRIPTION_ID: 'b2b8a5e6-9a34-494b-ba62-fe9be95bd398'
+  RESOURCE_GROUP: 'mlopsnew-dev-rg'
+  ML_WORKSPACE: 'mlopsnew-dev-mlw'
+  
+  # Training configuration
   JOB_YML: src/job.yml
   TRAINING_DATA: ${{ secrets.AZURE_ML_TRAINING_DATA_PATH || '' }}
   MODEL_NAME: diabetes_classification
@@ -28,9 +33,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
 
       - name: Install dependencies (for lint)
         run: |
@@ -55,9 +61,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
 
       - name: Install dependencies (for tests)
         run: |
@@ -110,7 +117,7 @@ jobs:
         id: submit_job
         run: |
           echo "Submitting job from $JOB_YML"
-          CMD="az ml job create --file \"$JOB_YML\" --resource-group \"$AZURE_ML_RESOURCE_GROUP\" --workspace-name \"$AZURE_ML_WORKSPACE_NAME\" --subscription $AZURE_SUBSCRIPTION_ID -o json"
+          CMD="az ml job create --file \"$JOB_YML\" --resource-group \"$RESOURCE_GROUP\" --workspace-name \"$ML_WORKSPACE\" --subscription $AZURE_SUBSCRIPTION_ID -o json"
           if [ -n "${TRAINING_DATA}" ]; then
             echo "Overriding inputs.training_data.path with: ${TRAINING_DATA}"
             CMD="$CMD --set inputs.training_data.path='${TRAINING_DATA}'"
@@ -124,7 +131,7 @@ jobs:
           echo "$JOB_JSON"
           echo "::endgroup::"
           echo "Submitted job id: $JOB_ID"
-          echo "Azure ML Studio URL (open in browser): https://ml.azure.com/jobs/$JOB_ID?workspaceName=$AZURE_ML_WORKSPACE_NAME"
+          echo "Azure ML Studio URL (open in browser): https://ml.azure.com/jobs/$JOB_ID?workspaceName=$ML_WORKSPACE"
 
       - name: Wait for job completion
         run: |
@@ -133,8 +140,8 @@ jobs:
           STATUS="Running"
           while [ "$STATUS" = "Running" ] || [ "$STATUS" = "Queued" ] || [ "$STATUS" = "Preparing" ] || [ "$STATUS" = "Starting" ] || [ "$STATUS" = "Finalizing" ] || [ "$STATUS" = "Provisioning" ]; do
             STATUS=$(az ml job show --name "$JOB_ID" \
-              --resource-group "$AZURE_ML_RESOURCE_GROUP" \
-              --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --workspace-name "$ML_WORKSPACE" \
               --subscription "$AZURE_SUBSCRIPTION_ID" \
               --query "status" -o tsv)
             echo "Status: $STATUS"
@@ -159,8 +166,8 @@ jobs:
             --verbose \
             --name "$JOB_ID" \
             --download-path downloaded_model \
-            --resource-group "$AZURE_ML_RESOURCE_GROUP" \
-            --workspace-name "$AZURE_ML_WORKSPACE_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --workspace-name "$ML_WORKSPACE" \
             --subscription "$AZURE_SUBSCRIPTION_ID" || true
 
           # Create target folder
@@ -200,7 +207,7 @@ jobs:
       - name: Run compare_metrics.py to see if F1 improved
         id: compare_metrics
         run: |
-          python src/compare_metrics.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.AZURE_ML_RESOURCE_GROUP }}" --workspace "${{ env.AZURE_ML_WORKSPACE_NAME }}"
+          python src/compare_metrics.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.RESOURCE_GROUP }}" --workspace "${{ env.ML_WORKSPACE }}"
           cat improved.txt || true
 
       - name: Set improved output for job
@@ -256,4 +263,4 @@ jobs:
 
       - name: Register the model locally (register_local.py)
         run: |
-          python src/register_local.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.AZURE_ML_RESOURCE_GROUP }}" --workspace "${{ env.AZURE_ML_WORKSPACE_NAME }}"
+          python src/register_local.py --model_dir downloaded_model --model_name "${{ env.MODEL_NAME }}" --primary_metric "${{ env.PRIMARY_METRIC }}" --subscription_id "${{ env.AZURE_SUBSCRIPTION_ID }}" --resource_group "${{ env.RESOURCE_GROUP }}" --workspace "${{ env.ML_WORKSPACE }}"

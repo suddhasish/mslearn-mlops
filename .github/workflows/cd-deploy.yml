@@ -35,10 +35,6 @@ env:
   AZURE_SUBSCRIPTION_ID: 'b2b8a5e6-9a34-494b-ba62-fe9be95bd398'
   RESOURCE_GROUP: 'mlopsnew-dev-rg'
   ML_WORKSPACE: 'mlopsnew-dev-mlw'
-  CONTAINER_REGISTRY: 'mlopsnewdevacr3kxldb.azurecr.io'
-  AKS_CLUSTER: 'mlopsnew-dev-aks'
-  KEY_VAULT: 'mlopsnew-dev-kv-3kxldb'
-  STORAGE_ACCOUNT: 'mlopsnewdevst3kxldb'
   
   # Endpoint configuration
   # Staging endpoint: For initial testing and validation
@@ -65,9 +61,6 @@ jobs:
       aml_workspace: ${{ steps.resolve.outputs.aml_workspace }}
       resource_group: ${{ steps.resolve.outputs.resource_group }}
       subscription_id: ${{ steps.resolve.outputs.subscription_id }}
-      container_registry: ${{ steps.resolve.outputs.container_registry }}
-      aks_cluster: ${{ steps.resolve.outputs.aks_cluster }}
-      key_vault: ${{ steps.resolve.outputs.key_vault }}
       deployment_id: ${{ steps.resolve.outputs.deployment_id }}
     steps:
       - name: Generate deployment ID
@@ -83,9 +76,6 @@ jobs:
           echo "aml_workspace=${{ env.ML_WORKSPACE }}" >> $GITHUB_OUTPUT
           echo "resource_group=${{ env.RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "subscription_id=${{ env.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_OUTPUT
-          echo "container_registry=${{ env.CONTAINER_REGISTRY }}" >> $GITHUB_OUTPUT
-          echo "aks_cluster=${{ env.AKS_CLUSTER }}" >> $GITHUB_OUTPUT
-          echo "key_vault=${{ env.KEY_VAULT }}" >> $GITHUB_OUTPUT
           echo "deployment_id=${{ steps.deployment_id.outputs.id }}" >> $GITHUB_OUTPUT
 
       - name: Display infrastructure configuration
@@ -98,9 +88,6 @@ jobs:
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Resource Group | ${{ steps.resolve.outputs.resource_group }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ML Workspace | ${{ steps.resolve.outputs.aml_workspace }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Container Registry | ${{ steps.resolve.outputs.container_registry }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| AKS Cluster | ${{ steps.resolve.outputs.aks_cluster }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Key Vault | ${{ steps.resolve.outputs.key_vault }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Subscription | ${{ steps.resolve.outputs.subscription_id }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Endpoints:**" >> $GITHUB_STEP_SUMMARY
