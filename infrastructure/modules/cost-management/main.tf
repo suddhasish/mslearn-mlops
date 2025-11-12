@@ -41,6 +41,21 @@ resource "azurerm_storage_container" "cost_exports" {
   container_access_type = "private"
 }
 
+# Action Group for alerts
+resource "azurerm_monitor_action_group" "cost_alerts" {
+  count               = var.enable_cost_alerts ? 1 : 0
+  name                = "${var.resource_prefix}-cost-alerts-ag"
+  resource_group_name = var.resource_group_name
+  short_name          = "costalerts"
+
+  email_receiver {
+    name          = "sendtoadmin"
+    email_address = var.notification_email
+  }
+
+  tags = var.tags
+}
+
 # Scheduled Query for underutilization detection
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "underutilization" {
   count               = var.enable_cost_alerts ? 1 : 0
@@ -79,7 +94,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "underutilization" {
   skip_query_validation            = false
 
   action {
-    action_groups = [var.monitor_action_group_id]
+    action_groups = [azurerm_monitor_action_group.cost_alerts[0].id]
   }
 
   tags = var.tags

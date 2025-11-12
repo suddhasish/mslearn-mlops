@@ -188,7 +188,6 @@ module "cost_management" {
   resource_group_id          = azurerm_resource_group.mlops.id
   storage_account_name       = module.storage.storage_account_name
   log_analytics_workspace_id = module.ml_workspace.log_analytics_workspace_id
-  monitor_action_group_id    = module.ml_workspace.application_insights_id
   enable_cost_alerts         = var.enable_cost_alerts
   enable_data_factory        = var.enable_data_factory
   enable_logic_app           = var.enable_logic_app

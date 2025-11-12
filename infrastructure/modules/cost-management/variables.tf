@@ -28,11 +28,6 @@ variable "log_analytics_workspace_id" {
   type        = string
 }
 
-variable "monitor_action_group_id" {
-  description = "Monitor action group ID"
-  type        = string
-}
-
 variable "enable_cost_alerts" {
   description = "Enable cost monitoring alerts"
   type        = bool
