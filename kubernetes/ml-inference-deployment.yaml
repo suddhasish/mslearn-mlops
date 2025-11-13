@@ -11,10 +11,7 @@ metadata:
 spec:
   replicas: 1  # Start with 1 replica for faster rollouts - HPA will scale if needed
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1          # Allow 1 extra pod during update
-      maxUnavailable: 0    # Keep all current pods running during update
+    type: Recreate  # Terminate old pods before creating new ones (for resource-constrained clusters)
   selector:
     matchLabels:
       app: ml-inference

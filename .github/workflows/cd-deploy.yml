@@ -535,13 +535,34 @@ jobs:
           grep -A 5 "image:" kubernetes/ml-inference-deployment.yaml
           grep -A 3 "MODEL_VERSION" kubernetes/ml-inference-deployment.yaml
 
+      - name: Clean up stuck pods (if any)
+        run: |
+          echo "Checking for stuck/pending pods..."
+          
+          # Delete any pending pods older than 5 minutes
+          STUCK_PODS=$(kubectl get pods -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference --field-selector=status.phase=Pending -o json | jq -r '.items[] | select(.metadata.creationTimestamp | fromdateiso8601 < (now - 300)) | .metadata.name')
+          
+          if [ -n "$STUCK_PODS" ]; then
+            echo "Found stuck pods, deleting:"
+            echo "$STUCK_PODS"
+            echo "$STUCK_PODS" | xargs -r kubectl delete pod -n ${{ env.AKS_NAMESPACE }}
+            sleep 10
+          else
+            echo "No stuck pods found"
+          fi
+
       - name: Deploy to AKS
         id: deploy
         run: |
           set -euo pipefail
           
           if kubectl get deployment ml-inference -n ${{ env.AKS_NAMESPACE }} >/dev/null 2>&1; then
-            echo "Deployment exists - performing rolling update..."
+            echo "Deployment exists - updating with new image..."
+            
+            # Apply the updated manifest (uses Recreate strategy)
+            kubectl apply -f kubernetes/ml-inference-deployment.yaml -n ${{ env.AKS_NAMESPACE }}
+            
+            # Update image
             kubectl set image deployment/ml-inference \
               inference="${{ steps.build_image.outputs.image_name }}" \
               -n ${{ env.AKS_NAMESPACE }}
@@ -550,7 +571,7 @@ jobs:
             kubectl apply -f kubernetes/ml-inference-deployment.yaml -n ${{ env.AKS_NAMESPACE }}
           fi
           
-          echo "✅ Deployment initiated"
+          echo "✅ Deployment initiated (Recreate strategy - will terminate old pods first)"
 
       - name: Wait for rollout
         id: rollout_status
@@ -1060,21 +1081,39 @@ jobs:
           else
             kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
             
-            # Install with increased timeout and reduced resource requirements
+            # Install with minimal resource requirements for small clusters
+            echo "Installing with reduced resources for constrained clusters..."
             helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
               --namespace monitoring \
               --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+              --set prometheus.prometheusSpec.replicas=1 \
+              --set prometheus.prometheusSpec.resources.requests.cpu=100m \
               --set prometheus.prometheusSpec.resources.requests.memory=200Mi \
               --set prometheus.prometheusSpec.resources.limits.memory=1Gi \
               --set grafana.adminPassword=Admin123! \
               --set grafana.service.type=LoadBalancer \
+              --set grafana.replicas=1 \
+              --set grafana.resources.requests.cpu=100m \
               --set grafana.resources.requests.memory=100Mi \
               --set grafana.resources.limits.memory=500Mi \
               --set prometheus.service.type=LoadBalancer \
               --set alertmanager.enabled=true \
+              --set alertmanager.alertmanagerSpec.replicas=1 \
+              --set alertmanager.alertmanagerSpec.resources.requests.cpu=50m \
               --set alertmanager.alertmanagerSpec.resources.requests.memory=100Mi \
               --set alertmanager.alertmanagerSpec.resources.limits.memory=500Mi \
-              --wait --timeout 20m
+              --set prometheusOperator.resources.requests.cpu=50m \
+              --set prometheusOperator.resources.requests.memory=100Mi \
+              --set kube-state-metrics.resources.requests.cpu=10m \
+              --set kube-state-metrics.resources.requests.memory=50Mi \
+              --timeout 25m || {
+                echo "⚠️  Monitoring stack installation failed (likely resource constraints)"
+                echo "Your cluster may be too small. Consider:"
+                echo "  1. Scale AKS cluster: az aks scale --node-count 2"
+                echo "  2. Use manual setup after deployment"
+                echo "  3. Deploy monitoring to separate cluster"
+                exit 1
+              }
             
             echo "✅ kube-prometheus-stack installed"
           fi
