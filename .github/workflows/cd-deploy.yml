@@ -14,7 +14,7 @@ on:
       model_name:
         description: 'Model name to deploy'
         required: true
-        default: 'diabetes-classifier'
+        default: 'diabetes_classification'
       model_version:
         description: 'Model version (e.g., 1, 2, latest)'
         required: true
@@ -71,7 +71,7 @@ jobs:
         id: resolve
         run: |
           # Use DEV infrastructure (Terraform-deployed)
-          echo "model_name=${{ github.event.inputs.model_name || github.event.client_payload.model_name || 'diabetes-classifier' }}" >> $GITHUB_OUTPUT
+          echo "model_name=${{ github.event.inputs.model_name || github.event.client_payload.model_name || 'diabetes_classification' }}" >> $GITHUB_OUTPUT
           echo "model_version=${{ github.event.inputs.model_version || github.event.client_payload.model_version || 'latest' }}" >> $GITHUB_OUTPUT
           echo "aml_workspace=${{ env.ML_WORKSPACE }}" >> $GITHUB_OUTPUT
           echo "resource_group=${{ env.RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
