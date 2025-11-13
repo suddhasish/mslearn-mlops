@@ -12,7 +12,8 @@ headers = {'Content-Type': 'application/json'}
 if args.key:
     headers['Authorization'] = f'Bearer {args.key}'
 
-payload = {"input_data": [[0]]}  # replace with a valid payload for your model
+# Sample data: Pregnancies,PlasmaGlucose,DiastolicBloodPressure,TricepsThickness,SerumInsulin,BMI,DiabetesPedigree,Age,Diabetic
+payload = {"input_data": [[1, 78, 41, 33, 311, 50.79, 0.42, 24, 0]]}
 
 resp = requests.post(args.url, headers=headers, json=payload, timeout=30)
 print('Status:', resp.status_code)
