@@ -573,6 +573,35 @@ jobs:
             echo "EXTERNAL_IP=pending" >> $GITHUB_OUTPUT
           fi
 
+      - name: Verify pod health
+        run: |
+          set -euo pipefail
+          
+          echo "Checking pod status..."
+          kubectl get pods -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference
+          
+          echo ""
+          echo "Pod logs (last 50 lines):"
+          POD_NAME=$(kubectl get pods -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "$POD_NAME" ]; then
+            kubectl logs "$POD_NAME" -n ${{ env.AKS_NAMESPACE }} --tail=50 || echo "Could not retrieve logs"
+          else
+            echo "No pods found"
+          fi
+          
+          echo ""
+          echo "Checking pod readiness..."
+          READY_PODS=$(kubectl get pods -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference \
+            -o jsonpath='{.items[?(@.status.conditions[?(@.type=="Ready")].status=="True")].metadata.name}' | wc -w)
+          
+          echo "Ready pods: $READY_PODS"
+          
+          if [ "$READY_PODS" -eq 0 ]; then
+            echo "::error::No pods are ready. Deployment may have failed."
+            kubectl describe pods -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference
+            exit 1
+          fi
+
       - name: Run smoke tests
         if: steps.get_service_ip.outputs.EXTERNAL_IP != 'pending'
         run: |
@@ -582,13 +611,38 @@ jobs:
           
           echo "Running smoke tests against: $ENDPOINT_URL"
           
-          # Health check
-          curl -f "${ENDPOINT_URL}/health" || (echo "Health check failed" && exit 1)
+          # Health check with retries
+          MAX_RETRIES=3
+          for i in $(seq 1 $MAX_RETRIES); do
+            if curl -f --max-time 10 "${ENDPOINT_URL}/health"; then
+              echo "✅ Health check passed"
+              break
+            else
+              if [ $i -eq $MAX_RETRIES ]; then
+                echo "::error::Health check failed after $MAX_RETRIES attempts"
+                exit 1
+              fi
+              echo "Health check attempt $i failed, retrying..."
+              sleep 5
+            fi
+          done
           
           # Prediction test
-          curl -X POST "${ENDPOINT_URL}/score" \
+          RESPONSE=$(curl -X POST "${ENDPOINT_URL}/score" \
             -H "Content-Type: application/json" \
-            -d '{"input_data": [[1,2,3,4,5,6,7,8]]}' || (echo "Prediction test failed" && exit 1)
+            -d '{"input_data": [[1,78,41,33,311,50.79,0.42,24,0]]}' \
+            --max-time 30 -w "\n%{http_code}" -s)
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+          
+          echo "Response code: $HTTP_CODE"
+          echo "Response body: $BODY"
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Prediction test failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
           
           echo "✅ Smoke tests passed"
 
