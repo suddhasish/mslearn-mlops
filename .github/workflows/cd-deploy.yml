@@ -100,13 +100,13 @@ jobs:
           echo "Resolving model: $MODEL_NAME (requested: $MODEL_VERSION_RAW)"
 
           if [ "${MODEL_VERSION_RAW}" = "latest" ]; then
-            # Query Azure ML for the latest model version
-            MODEL_VERSION=$(az ml model show \
+            # Query Azure ML for all versions and get the latest one
+            MODEL_VERSION=$(az ml model list \
               --name "${MODEL_NAME}" \
               --workspace-name "${{ env.ML_WORKSPACE }}" \
               --resource-group "${{ env.RESOURCE_GROUP }}" \
               --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}" \
-              --query "latest_version" -o tsv)
+              --query "[0].version" -o tsv)
 
             if [ -z "${MODEL_VERSION}" ] || [ "${MODEL_VERSION}" = "null" ]; then
               echo "::error::No registered versions found for model '${MODEL_NAME}'"
