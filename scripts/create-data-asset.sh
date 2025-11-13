@@ -8,17 +8,27 @@ SUBSCRIPTION_ID="b2b8a5e6-9a34-494b-ba62-fe9be95bd398"
 RESOURCE_GROUP="mlopsnew-dev-rg"
 WORKSPACE="mlopsnew-dev-mlw"
 STORAGE_ACCOUNT="mlopsnewdevst3kxldb"
-CONTAINER_NAME="training-data"
+CONTAINER_NAME=""  # Will be discovered from workspaceblobstore
 BLOB_PATH="diabetes"
 DATA_NAME="diabetes-dev-folder"
 DATA_VERSION="$(date +%Y%m%d%H%M%S)"  # Use timestamp for unique version
 LOCAL_DATA_PATH="production/data"
 
 echo "=========================================="
-echo "Step 1: Create blob container in storage account"
+echo "Step 1: Get workspaceblobstore container name"
 echo "=========================================="
+
+# Get the actual container name used by workspaceblobstore
+echo "Querying Azure ML datastore for container name..."
+CONTAINER_NAME=$(az ml datastore show \
+  --name workspaceblobstore \
+  --workspace-name "$WORKSPACE" \
+  --resource-group "$RESOURCE_GROUP" \
+  --subscription "$SUBSCRIPTION_ID" \
+  --query "container_name" -o tsv)
+
 echo "Storage Account: $STORAGE_ACCOUNT"
-echo "Container: $CONTAINER_NAME"
+echo "Container (from workspaceblobstore): $CONTAINER_NAME"
 
 # Get storage account key
 echo "Getting storage account key..."
@@ -28,14 +38,7 @@ STORAGE_KEY=$(az storage account keys list \
   --subscription "$SUBSCRIPTION_ID" \
   --query "[0].value" -o tsv)
 
-# Create container if it doesn't exist (using account key)
-az storage container create \
-  --name "$CONTAINER_NAME" \
-  --account-name "$STORAGE_ACCOUNT" \
-  --account-key "$STORAGE_KEY" \
-  --only-show-errors || true
-
-echo "✅ Container created/verified"
+echo "✅ Container name retrieved: $CONTAINER_NAME"
 echo ""
 
 echo "=========================================="
