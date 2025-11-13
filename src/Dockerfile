@@ -11,12 +11,12 @@ RUN apt-get update && \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir \
+# Install Python dependencies for inference
+RUN pip install --no-cache-dir \
+    scikit-learn==1.5.0 \
+    pandas==2.2.0 \
+    numpy==1.26.0 \
+    joblib==1.4.0 \
     flask==3.0.0 \
     gunicorn==21.2.0 \
     prometheus-client==0.19.0
