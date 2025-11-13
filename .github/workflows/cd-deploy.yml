@@ -1,9 +1,8 @@
-name: CD - MLOps Blue/Green Deployment with Approval
+name: CD - MLOps Deployment (Managed Endpoint + AKS)
 
 # This workflow uses Terraform-deployed DEV infrastructure
-# Both staging and production endpoints are deployed in DEV environment
-# - Staging endpoint: ml-endpoint-staging (for testing)
-# - Production endpoint: ml-endpoint-production (for blue/green deployment)
+# - Staging endpoint: Azure ML Managed Online Endpoint (ml-endpoint-staging)
+# - Production deployment: AKS cluster (mlopsnew-dev-aks)
 # 
 # Infrastructure: mlopsnew-dev-* resources (deployed via Terraform)
 # See INFRASTRUCTURE_INTEGRATION.md for details
@@ -41,10 +40,10 @@ env:
   AZURE_ML_STAGING_ENDPOINT_NAME: ml-endpoint-staging
   STAGING_DEPLOYMENT_NAME: staging-deployment
   
-  # Production endpoint: For blue/green deployment with gradual rollout
-  AZURE_ML_PRODUCTION_ENDPOINT_NAME: ml-endpoint-production
-  PROD_BLUE_DEPLOYMENT_NAME: blue-deployment
-  PROD_GREEN_DEPLOYMENT_NAME: green-deployment
+  # Production deployment: AKS cluster
+  AKS_CLUSTER_NAME: mlopsnew-dev-aks
+  AKS_NAMESPACE: production
+  ACR_NAME: mlopsnewdevacr
   
   # Deployment configuration
   MAX_WAIT_ITERATIONS: 30
@@ -91,8 +90,8 @@ jobs:
           echo "| Subscription | ${{ steps.resolve.outputs.subscription_id }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Endpoints:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Staging: `${{ env.AZURE_ML_STAGING_ENDPOINT_NAME }}`" >> $GITHUB_STEP_SUMMARY
-          echo "- Production: `${{ env.AZURE_ML_PRODUCTION_ENDPOINT_NAME }}`" >> $GITHUB_STEP_SUMMARY
+          echo "- Staging: `${{ env.AZURE_ML_STAGING_ENDPOINT_NAME }}` (Managed Online Endpoint)" >> $GITHUB_STEP_SUMMARY
+          echo "- Production: `${{ env.AKS_CLUSTER_NAME }}/${{ env.AKS_NAMESPACE }}` (AKS Cluster)" >> $GITHUB_STEP_SUMMARY
 
       - name: Log deployment configuration
         run: |
@@ -154,13 +153,7 @@ jobs:
             --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
             --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
             --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
-            --auth-mode key \
-            --tags environment=staging \
-                   deployed_by="${{ github.actor }}" \
-                   deployment_run="${{ github.run_id }}" \
-                   deployment_id="${{ needs.resolve-inputs.outputs.deployment_id }}" \
-                   model_name="${{ needs.resolve-inputs.outputs.model_name }}" \
-                   model_version="${{ needs.resolve-inputs.outputs.model_version }}"
+            --auth-mode key
 
       - name: Handle endpoint creation result
         if: steps.create_staging_endpoint.outcome == 'failure'
@@ -321,11 +314,208 @@ jobs:
           echo "**Instance**: Standard_DS2_v2 (x1)" >> $GITHUB_STEP_SUMMARY
           echo "**Infrastructure**: DEV (mlopsnew-dev-rg)" >> $GITHUB_STEP_SUMMARY
 
-  prepare-production:
-    name: Prepare Production Blue/Green Deployment
+  deploy-production-aks:
+    name: Deploy to Production (AKS)
     needs: [resolve-inputs, deploy-staging]
     runs-on: ubuntu-latest
-    if: needs.deploy-staging.outputs.deployment_state == 'success'
+    environment:
+      name: production
+      url: http://${{ steps.get_service_ip.outputs.EXTERNAL_IP }}
+    outputs:
+      service_url: ${{ steps.get_service_ip.outputs.EXTERNAL_IP }}
+      deployment_status: ${{ steps.rollout_status.outputs.status }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install Azure ML CLI extension
+        run: |
+          az extension add --name ml --yes --upgrade
+
+      - name: Download model from Azure ML
+        run: |
+          set -euo pipefail
+          
+          echo "Downloading model: ${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}"
+          
+          mkdir -p src/model
+          
+          az ml model download \
+            --name "${{ needs.resolve-inputs.outputs.model_name }}" \
+            --version "${{ needs.resolve-inputs.outputs.model_version }}" \
+            --download-path src/model \
+            --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
+            --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
+            --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}"
+          
+          echo "✅ Model downloaded to src/model/"
+          ls -la src/model/
+
+      - name: Build and push Docker image to ACR
+        run: |
+          set -euo pipefail
+          
+          echo "Building Docker image for AKS deployment..."
+          
+          # Login to ACR
+          az acr login --name ${{ env.ACR_NAME }}
+          
+          # Get ACR login server
+          ACR_LOGIN_SERVER=$(az acr show --name ${{ env.ACR_NAME }} --query loginServer -o tsv)
+          
+          # Build image with timestamp tag
+          IMAGE_TAG="v${{ needs.resolve-inputs.outputs.model_version }}-$(date +%Y%m%d%H%M%S)"
+          IMAGE_NAME="${ACR_LOGIN_SERVER}/ml-inference:${IMAGE_TAG}"
+          IMAGE_LATEST="${ACR_LOGIN_SERVER}/ml-inference:latest"
+          
+          echo "Image: $IMAGE_NAME"
+          
+          # Build and push
+          cd src
+          docker build \
+            --build-arg MODEL_VERSION="${{ needs.resolve-inputs.outputs.model_version }}" \
+            --build-arg MODEL_NAME="${{ needs.resolve-inputs.outputs.model_name }}" \
+            -t "$IMAGE_NAME" \
+            -t "$IMAGE_LATEST" \
+            -f Dockerfile .
+          
+          docker push "$IMAGE_NAME"
+          docker push "$IMAGE_LATEST"
+          
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "✅ Image pushed: $IMAGE_NAME"
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ needs.resolve-inputs.outputs.resource_group }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
+          
+          echo "✅ AKS credentials configured"
+
+      - name: Create namespace
+        run: |
+          kubectl create namespace ${{ env.AKS_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          echo "✅ Namespace ready: ${{ env.AKS_NAMESPACE }}"
+
+      - name: Update deployment manifest
+        run: |
+          set -euo pipefail
+          
+          # Update image and environment variables in deployment manifest
+          sed -i "s|image: .*azurecr.io/ml-inference:.*|image: ${{ env.IMAGE_NAME }}|g" kubernetes/ml-inference-deployment.yaml
+          sed -i "s|value: \"latest\"|value: \"${{ needs.resolve-inputs.outputs.model_version }}\"|g" kubernetes/ml-inference-deployment.yaml
+          sed -i "s|value: \"diabetes_classification\"|value: \"${{ needs.resolve-inputs.outputs.model_name }}\"|g" kubernetes/ml-inference-deployment.yaml
+          
+          echo "Updated manifest:"
+          grep -A 5 "image:" kubernetes/ml-inference-deployment.yaml
+          grep -A 3 "MODEL_VERSION" kubernetes/ml-inference-deployment.yaml
+
+      - name: Deploy to AKS
+        id: deploy
+        run: |
+          set -euo pipefail
+          
+          if kubectl get deployment ml-inference -n ${{ env.AKS_NAMESPACE }} >/dev/null 2>&1; then
+            echo "Deployment exists - performing rolling update..."
+            kubectl set image deployment/ml-inference \
+              inference="${{ env.IMAGE_NAME }}" \
+              -n ${{ env.AKS_NAMESPACE }}
+          else
+            echo "Creating new deployment..."
+            kubectl apply -f kubernetes/ml-inference-deployment.yaml -n ${{ env.AKS_NAMESPACE }}
+          fi
+          
+          echo "✅ Deployment initiated"
+
+      - name: Wait for rollout
+        id: rollout_status
+        run: |
+          set -euo pipefail
+          
+          echo "Waiting for deployment rollout..."
+          kubectl rollout status deployment/ml-inference -n ${{ env.AKS_NAMESPACE }} --timeout=10m
+          
+          echo "status=succeeded" >> $GITHUB_OUTPUT
+          echo "✅ Rollout completed successfully"
+
+      - name: Get service external IP
+        id: get_service_ip
+        run: |
+          set -euo pipefail
+          
+          echo "Waiting for LoadBalancer to assign external IP..."
+          
+          for i in {1..60}; do
+            EXTERNAL_IP=$(kubectl get service ml-inference -n ${{ env.AKS_NAMESPACE }} \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            
+            if [ -n "$EXTERNAL_IP" ]; then
+              echo "EXTERNAL_IP=$EXTERNAL_IP" >> $GITHUB_OUTPUT
+              echo "✅ Service URL: http://${EXTERNAL_IP}"
+              break
+            fi
+            
+            echo "Waiting for external IP... ($i/60)"
+            sleep 10
+          done
+          
+          if [ -z "$EXTERNAL_IP" ]; then
+            echo "::warning::Timeout waiting for external IP"
+            echo "EXTERNAL_IP=pending" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run smoke tests
+        if: steps.get_service_ip.outputs.EXTERNAL_IP != 'pending'
+        run: |
+          set -euo pipefail
+          
+          ENDPOINT_URL="http://${{ steps.get_service_ip.outputs.EXTERNAL_IP }}"
+          
+          echo "Running smoke tests against: $ENDPOINT_URL"
+          
+          # Health check
+          curl -f "${ENDPOINT_URL}/health" || (echo "Health check failed" && exit 1)
+          
+          # Prediction test
+          curl -X POST "${ENDPOINT_URL}/score" \
+            -H "Content-Type: application/json" \
+            -d '{"input_data": [[1,2,3,4,5,6,7,8]]}' || (echo "Prediction test failed" && exit 1)
+          
+          echo "✅ Smoke tests passed"
+
+      - name: Display deployment summary
+        run: |
+          echo "### 🚀 Production Deployment (AKS) - Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Model**: ${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cluster**: ${{ env.AKS_CLUSTER_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace**: ${{ env.AKS_NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.get_service_ip.outputs.EXTERNAL_IP }}" != "pending" ]; then
+            echo "**Service URL**: http://${{ steps.get_service_ip.outputs.EXTERNAL_IP }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployment Status**:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get deployments -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference
+          kubectl get pods -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference
+          kubectl get service ml-inference -n ${{ env.AKS_NAMESPACE }}
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  prepare-production:
+    name: Prepare Production Blue/Green Deployment (Managed Endpoints - Disabled)
+    needs: [resolve-inputs, deploy-staging]
+    runs-on: ubuntu-latest
+    if: false  # Disabled: Using AKS for production instead
     outputs:
       green_deployment_url: ${{ steps.get_green_endpoint.outputs.DEPLOYMENT_URL }}
       production_ready: ${{ steps.green_status.outputs.ready }}
@@ -368,13 +558,7 @@ jobs:
             --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
             --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
             --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
-            --auth-mode key \
-            --tags environment=production \
-                   deployed_by="${{ github.actor }}" \
-                   deployment_run="${{ github.run_id }}" \
-                   deployment_id="${{ needs.resolve-inputs.outputs.deployment_id }}" \
-                   model_name="${{ needs.resolve-inputs.outputs.model_name }}" \
-                   model_version="${{ needs.resolve-inputs.outputs.model_version }}"
+            --auth-mode key
 
       - name: Handle production endpoint creation result
         if: steps.create_prod_endpoint.outcome == 'failure'
@@ -575,9 +759,10 @@ jobs:
           echo "**Next step**: Manual approval required to begin gradual traffic shift"
 
   await-production-approval:
-    name: 🔒 Await Production Approval
-    needs: [resolve-inputs, deploy-staging, prepare-production]
+    name: 🔒 Await Production Approval (Managed Endpoints - Disabled)
+    needs: [resolve-inputs, deploy-staging, deploy-production-aks]
     runs-on: ubuntu-latest
+    if: false  # Disabled: Using AKS for production
     environment:
       name: production
       url: https://portal.azure.com/#@/resource/subscriptions/${{ needs.resolve-inputs.outputs.subscription_id }}/resourceGroups/${{ needs.resolve-inputs.outputs.resource_group }}/providers/Microsoft.MachineLearningServices/workspaces/${{ needs.resolve-inputs.outputs.aml_workspace }}/endpoints/${{ env.AZURE_ML_PRODUCTION_ENDPOINT_NAME }}
@@ -594,7 +779,7 @@ jobs:
           echo "- Deployment ID: ${{ needs.resolve-inputs.outputs.deployment_id }}" >> $GITHUB_STEP_SUMMARY
           echo "- Endpoint: $AZURE_ML_PRODUCTION_ENDPOINT_NAME" >> $GITHUB_STEP_SUMMARY
           echo "- Staging URL: ${{ needs.deploy-staging.outputs.endpoint_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Production URL (GREEN): ${{ needs.prepare-production.outputs.green_deployment_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Production URL (AKS): http://${{ needs.deploy-production-aks.outputs.service_url }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Rollout Plan:**" >> $GITHUB_STEP_SUMMARY
           echo "1. Shift 10% traffic to GREEN → smoke test" >> $GITHUB_STEP_SUMMARY
@@ -605,9 +790,10 @@ jobs:
           echo "⚠️  **Approve this deployment to begin the gradual traffic rollout**"
 
   gradual-rollout:
-    name: 🚀 Gradual Blue→Green Traffic Rollout
+    name: 🚀 Gradual Blue→Green Traffic Rollout (Managed Endpoints - Disabled)
     needs: [resolve-inputs, await-production-approval]
     runs-on: ubuntu-latest
+    if: false  # Disabled: Using AKS rolling update for production
     environment:
       name: production
       url: https://portal.azure.com/#@/resource/subscriptions/${{ needs.resolve-inputs.outputs.subscription_id }}/resourceGroups/${{ needs.resolve-inputs.outputs.resource_group }}/providers/Microsoft.MachineLearningServices/workspaces/${{ needs.resolve-inputs.outputs.aml_workspace }}/endpoints/${{ env.AZURE_ML_PRODUCTION_ENDPOINT_NAME }}

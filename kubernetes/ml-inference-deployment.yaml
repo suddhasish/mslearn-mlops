@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: inference
-        image: <your-acr>.azurecr.io/ml-inference:latest
+        image: mlopsnewdevacr.azurecr.io/ml-inference:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 5001
@@ -29,35 +29,13 @@ spec:
           protocol: TCP
         
         env:
-        # Model metadata
+        # Model metadata (will be set by deployment workflow)
         - name: MODEL_VERSION
-          value: "v1.0.0"
+          value: "latest"
         - name: MODEL_NAME
-          value: "diabetes-classifier"
+          value: "diabetes_classification"
         - name: DEPLOYMENT_NAME
           value: "production"
-        
-        # Redis configuration (if enabled)
-        - name: REDIS_HOST
-          valueFrom:
-            secretKeyRef:
-              name: redis-secret
-              key: host
-              optional: true
-        - name: REDIS_PORT
-          valueFrom:
-            secretKeyRef:
-              name: redis-secret
-              key: port
-              optional: true
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: redis-secret
-              key: password
-              optional: true
-        
-        # Model file location
         - name: AZUREML_MODEL_FILE
           value: "/app/model/model.pkl"
         
@@ -92,16 +70,6 @@ spec:
           timeoutSeconds: 3        # 3s timeout
           successThreshold: 1
           failureThreshold: 2      # Remove from load balancer after 2 failures
-        
-        volumeMounts:
-        - name: model-volume
-          mountPath: /app/model
-          readOnly: true
-      
-      volumes:
-      - name: model-volume
-        # Mount model from Azure ML workspace or blob storage
-        emptyDir: {}  # Replace with actual volume source
 
 ---
 apiVersion: v1
@@ -119,30 +87,3 @@ spec:
     name: http
   selector:
     app: ml-inference
-
----
-# Optional: Ingress for external access
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: ml-inference-ingress
-  annotations:
-    kubernetes.io/ingress.class: nginx
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-spec:
-  rules:
-  - host: inference.example.com  # Replace with your domain
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: ml-inference
-            port:
-              number: 80
-  tls:
-  - hosts:
-    - inference.example.com
-    secretName: inference-tls-secret

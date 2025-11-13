@@ -1,0 +1,176 @@
+# AKS Production Deployment Job
+# This replaces the prepare-production job in cd-deploy.yml
+
+  deploy-production-aks:
+    name: Deploy to Production (AKS)
+    needs: [resolve-inputs, deploy-staging]
+    runs-on: ubuntu-latest
+    if: needs.deploy-staging.outputs.deployment_state == 'success'
+    outputs:
+      image_tag: ${{ steps.build_image.outputs.image_tag }}
+      deployment_url: ${{ steps.get_service_url.outputs.url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install Azure CLI extensions
+        run: |
+          az extension add --name ml --yes --upgrade
+          az extension add --name aks-preview --yes --upgrade
+
+      - name: Get ACR credentials
+        id: acr_creds
+        run: |
+          ACR_NAME="mlopsnewdevacr"
+          ACR_USERNAME=$(az acr credential show --name $ACR_NAME --query username -o tsv)
+          ACR_PASSWORD=$(az acr credential show --name $ACR_NAME --query passwords[0].value -o tsv)
+          echo "::add-mask::$ACR_PASSWORD"
+          echo "username=$ACR_USERNAME" >> $GITHUB_OUTPUT
+          echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
+          echo "login_server=${ACR_NAME}.azurecr.io" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        id: build_image
+        run: |
+          set -euo pipefail
+          
+          IMAGE_TAG="v${{ needs.resolve-inputs.outputs.model_version }}-$(date +%Y%m%d%H%M%S)"
+          IMAGE_NAME="${{ steps.acr_creds.outputs.login_server }}/ml-inference:${IMAGE_TAG}"
+          IMAGE_LATEST="${{ steps.acr_creds.outputs.login_server }}/ml-inference:latest"
+          
+          echo "Building image: $IMAGE_NAME"
+          
+          # Login to ACR
+          echo "${{ steps.acr_creds.outputs.password }}" | docker login \
+            ${{ steps.acr_creds.outputs.login_server }} \
+            -u ${{ steps.acr_creds.outputs.username }} \
+            --password-stdin
+          
+          # Build image with Azure credentials for model download
+          # Note: This requires AZURE_CREDENTIALS to be available during build
+          cd src
+          docker build \
+            --build-arg MODEL_NAME=${{ needs.resolve-inputs.outputs.model_name }} \
+            --build-arg MODEL_VERSION=${{ needs.resolve-inputs.outputs.model_version }} \
+            --build-arg WORKSPACE_NAME=${{ needs.resolve-inputs.outputs.aml_workspace }} \
+            --build-arg RESOURCE_GROUP=${{ needs.resolve-inputs.outputs.resource_group }} \
+            --build-arg SUBSCRIPTION_ID=${{ needs.resolve-inputs.outputs.subscription_id }} \
+            -t $IMAGE_NAME \
+            -t $IMAGE_LATEST \
+            -f Dockerfile .
+          
+          # Push to ACR
+          docker push $IMAGE_NAME
+          docker push $IMAGE_LATEST
+          
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "✅ Image built and pushed: $IMAGE_NAME"
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ needs.resolve-inputs.outputs.resource_group }} \
+            --name mlopsnew-dev-aks \
+            --overwrite-existing
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace production --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Update deployment manifest with new image
+        run: |
+          IMAGE_NAME="${{ steps.acr_creds.outputs.login_server }}/ml-inference:${{ steps.build_image.outputs.image_tag }}"
+          
+          # Update the image in deployment manifest
+          sed -i "s|image: .*|image: $IMAGE_NAME|g" kubernetes/ml-inference-deployment.yaml
+          
+          # Update MODEL_VERSION environment variable
+          sed -i "s|value: \"v1\"|value: \"${{ needs.resolve-inputs.outputs.model_version }}\"|g" kubernetes/ml-inference-deployment.yaml
+
+      - name: Apply Kubernetes deployment (Blue/Green strategy)
+        run: |
+          set -euo pipefail
+          
+          # Check if deployment exists
+          if kubectl get deployment ml-inference -n production >/dev/null 2>&1; then
+            echo "Deployment exists - performing rolling update"
+            kubectl set image deployment/ml-inference \
+              inference=${{ steps.build_image.outputs.image_name }} \
+              -n production
+            
+            # Wait for rollout to complete
+            kubectl rollout status deployment/ml-inference -n production --timeout=5m
+          else
+            echo "Creating new deployment"
+            kubectl apply -f kubernetes/ml-inference-deployment.yaml -n production
+            
+            # Wait for deployment to be ready
+            kubectl wait --for=condition=available --timeout=5m \
+              deployment/ml-inference -n production
+          fi
+
+      - name: Get service URL
+        id: get_service_url
+        run: |
+          # Wait for LoadBalancer to get external IP
+          echo "Waiting for LoadBalancer to get external IP..."
+          
+          for i in {1..30}; do
+            EXTERNAL_IP=$(kubectl get service ml-inference -n production \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            
+            if [ -n "$EXTERNAL_IP" ]; then
+              URL="http://${EXTERNAL_IP}"
+              echo "url=$URL" >> $GITHUB_OUTPUT
+              echo "✅ Service URL: $URL"
+              break
+            fi
+            
+            echo "Waiting for external IP... ($i/30)"
+            sleep 10
+          done
+          
+          if [ -z "$EXTERNAL_IP" ]; then
+            echo "::warning::Timeout waiting for external IP"
+            echo "url=pending" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Test AKS endpoint
+        if: steps.get_service_url.outputs.url != 'pending'
+        run: |
+          URL="${{ steps.get_service_url.outputs.url }}"
+          
+          # Test health endpoint
+          echo "Testing health endpoint..."
+          curl -f "$URL/health" || echo "Health check failed"
+          
+          # Test scoring endpoint with sample data
+          echo "Testing scoring endpoint..."
+          curl -X POST "$URL/score" \
+            -H "Content-Type: application/json" \
+            -d '{"input_data": [[1,2,3,4,5,6,7,8]]}' || echo "Score test failed"
+
+      - name: Deployment summary
+        run: |
+          echo "### 🚀 AKS Production Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster | mlopsnew-dev-aks |" >> $GITHUB_STEP_SUMMARY
+          echo "| Namespace | production |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | ${{ steps.build_image.outputs.image_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Model | ${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Service URL | ${{ steps.get_service_url.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Show pod status
+          echo "**Pod Status:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n production -l app=ml-inference >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
