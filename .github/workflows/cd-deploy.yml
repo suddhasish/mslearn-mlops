@@ -547,6 +547,37 @@ jobs:
           echo "status=succeeded" >> $GITHUB_OUTPUT
           echo "✅ Rollout completed successfully"
 
+      - name: Setup monitoring (ServiceMonitor and Alerts)
+        run: |
+          set -euo pipefail
+          
+          echo "📊 Setting up Prometheus monitoring..."
+          
+          # Apply ServiceMonitor for metrics scraping
+          if kubectl apply -f kubernetes/ml-inference-servicemonitor.yaml; then
+            echo "✅ ServiceMonitor applied"
+          else
+            echo "⚠️ ServiceMonitor application failed (Prometheus Operator may not be installed)"
+            echo "To install Prometheus Operator, run: kubectl apply -f scripts/setup-monitoring.sh"
+          fi
+          
+          # Apply Alert Rules
+          if kubectl apply -f kubernetes/ml-inference-alerts.yaml; then
+            echo "✅ Alert rules applied"
+          else
+            echo "⚠️ Alert rules application failed (Prometheus Operator may not be installed)"
+          fi
+          
+          # Verify monitoring setup
+          echo ""
+          echo "Monitoring Status:"
+          kubectl get servicemonitor -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference || echo "ServiceMonitor not found (requires Prometheus Operator)"
+          kubectl get prometheusrule -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference || echo "PrometheusRule not found (requires Prometheus Operator)"
+          
+          echo ""
+          echo "📈 Metrics endpoint: http://ml-inference-svc:5001/metrics"
+          echo "To access Prometheus + Grafana, run: bash scripts/setup-monitoring.sh"
+
       - name: Get service external IP
         id: get_service_ip
         run: |

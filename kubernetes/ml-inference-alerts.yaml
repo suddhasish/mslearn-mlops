@@ -1,0 +1,140 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ml-inference-alerts
+  namespace: production
+  labels:
+    app: ml-inference
+    release: prometheus
+spec:
+  groups:
+    - name: ml-inference-performance
+      interval: 30s
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum(rate(model_errors_total[5m])) 
+              / 
+              sum(rate(model_predictions_total[5m]))
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            component: ml-inference
+          annotations:
+            summary: "High error rate detected in ML inference service"
+            description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes (threshold: 5%)"
+            
+        - alert: HighPredictionLatency
+          expr: |
+            histogram_quantile(0.95, 
+              sum(rate(model_prediction_duration_seconds_bucket[5m])) by (le, model_name, model_version)
+            ) > 2
+          for: 5m
+          labels:
+            severity: warning
+            component: ml-inference
+          annotations:
+            summary: "High prediction latency (P95) detected"
+            description: "P95 latency is {{ $value }}s for model {{ $labels.model_name }}:{{ $labels.model_version }}"
+            
+        - alert: VeryHighPredictionLatency
+          expr: |
+            histogram_quantile(0.95, 
+              sum(rate(model_prediction_duration_seconds_bucket[5m])) by (le, model_name, model_version)
+            ) > 5
+          for: 2m
+          labels:
+            severity: critical
+            component: ml-inference
+          annotations:
+            summary: "Very high prediction latency (P95) detected"
+            description: "P95 latency is {{ $value }}s for model {{ $labels.model_name }}:{{ $labels.model_version }}"
+            
+        - alert: LowThroughput
+          expr: |
+            sum(rate(model_predictions_total[5m])) < 0.1
+          for: 10m
+          labels:
+            severity: warning
+            component: ml-inference
+          annotations:
+            summary: "Low prediction throughput detected"
+            description: "Prediction rate is {{ $value }} req/s (expected > 0.1 req/s)"
+            
+    - name: ml-inference-availability
+      interval: 30s
+      rules:
+        - alert: PodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{
+              namespace="production",
+              pod=~"ml-inference.*"
+            }[15m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: ml-inference
+          annotations:
+            summary: "Pod is crash looping"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+            
+        - alert: PodNotReady
+          expr: |
+            sum by (pod) (
+              kube_pod_status_phase{
+                namespace="production",
+                pod=~"ml-inference.*",
+                phase!="Running"
+              }
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: ml-inference
+          annotations:
+            summary: "Pod not in Running state"
+            description: "Pod {{ $labels.pod }} is in {{ $labels.phase }} state"
+            
+        - alert: HighMemoryUsage
+          expr: |
+            (
+              sum(container_memory_working_set_bytes{
+                namespace="production",
+                pod=~"ml-inference.*"
+              })
+              /
+              sum(container_spec_memory_limit_bytes{
+                namespace="production",
+                pod=~"ml-inference.*"
+              })
+            ) > 0.85
+          for: 5m
+          labels:
+            severity: warning
+            component: ml-inference
+          annotations:
+            summary: "High memory usage detected"
+            description: "Memory usage is {{ $value | humanizePercentage }} of limit"
+            
+        - alert: HighCPUUsage
+          expr: |
+            (
+              sum(rate(container_cpu_usage_seconds_total{
+                namespace="production",
+                pod=~"ml-inference.*"
+              }[5m]))
+              /
+              sum(container_spec_cpu_quota{
+                namespace="production",
+                pod=~"ml-inference.*"
+              } / 100000)
+            ) > 0.85
+          for: 5m
+          labels:
+            severity: warning
+            component: ml-inference
+          annotations:
+            summary: "High CPU usage detected"
+            description: "CPU usage is {{ $value | humanizePercentage }} of limit"

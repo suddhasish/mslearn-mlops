@@ -77,6 +77,12 @@ def liveness():\n\
     result, status_code = score.liveness()\n\
     return jsonify(result), status_code\n\
 \n\
+@app.route("/metrics", methods=["GET"])\n\
+def metrics():\n\
+    from flask import Response\n\
+    data, status_code, headers = score.metrics()\n\
+    return Response(data, status=status_code, headers=headers)\n\
+\n\
 if __name__ == "__main__":\n\
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5001)))' > app.py
 

@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-inference-metrics
+  namespace: production
+  labels:
+    app: ml-inference
+    component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    app: ml-inference
+  ports:
+    - name: metrics
+      port: 5001
+      targetPort: 5001
+      protocol: TCP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ml-inference
+  namespace: production
+  labels:
+    app: ml-inference
+    release: prometheus  # Must match Prometheus Operator label selector
+spec:
+  selector:
+    matchLabels:
+      app: ml-inference
+      component: metrics
+  namespaceSelector:
+    matchNames:
+      - production
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 
 import numpy as np
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 # Prefer joblib for sklearn models, fall back to pickle
 try:
@@ -26,6 +27,39 @@ DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME", "default")
 INIT_TIME = None
 REQUEST_COUNT = 0
 ERROR_COUNT = 0
+
+# Prometheus metrics
+PREDICTION_COUNTER = Counter(
+    'model_predictions_total',
+    'Total number of predictions',
+    ['model_name', 'model_version', 'status']
+)
+
+PREDICTION_LATENCY = Histogram(
+    'model_prediction_duration_seconds',
+    'Time spent on prediction',
+    ['model_name', 'model_version'],
+    buckets=[0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0]
+)
+
+ERROR_COUNTER = Counter(
+    'model_errors_total',
+    'Total number of errors',
+    ['model_name', 'model_version', 'error_type']
+)
+
+MODEL_INFO = Gauge(
+    'model_info',
+    'Model metadata',
+    ['model_name', 'model_version', 'deployment_name']
+)
+
+BATCH_SIZE_HISTOGRAM = Histogram(
+    'model_batch_size',
+    'Input batch size distribution',
+    ['model_name', 'model_version'],
+    buckets=[1, 5, 10, 25, 50, 100, 250, 500]
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -99,6 +133,13 @@ def init():
             )
             logger.error(msg)
             raise FileNotFoundError(msg)
+        
+        # Set Prometheus model info metric
+        MODEL_INFO.labels(
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION,
+            deployment_name=DEPLOYMENT_NAME
+        ).set(1)
         
         init_duration = time.time() - INIT_TIME
         logger.info(f"Model initialization completed successfully in {init_duration:.2f}s")
@@ -325,6 +366,8 @@ def run(request_body):
         
         # Add metadata and metrics
         inference_duration = time.time() - start_time
+        batch_size = len(prediction) if prediction is not None else 0
+        
         result["metadata"] = {
             "model_name": MODEL_NAME,
             "model_version": MODEL_VERSION,
@@ -332,8 +375,25 @@ def run(request_body):
             "request_id": request_id,
             "inference_time_ms": round(inference_duration * 1000, 2),
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "num_predictions": len(prediction) if prediction is not None else 0
+            "num_predictions": batch_size
         }
+        
+        # Update Prometheus metrics
+        PREDICTION_COUNTER.labels(
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION,
+            status='success'
+        ).inc()
+        
+        PREDICTION_LATENCY.labels(
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION
+        ).observe(inference_duration)
+        
+        BATCH_SIZE_HISTOGRAM.labels(
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION
+        ).observe(batch_size)
         
         logger.info(f"Request {request_id} completed in {inference_duration*1000:.2f}ms")
         
@@ -342,6 +402,20 @@ def run(request_body):
     except Exception as e:
         ERROR_COUNT += 1
         inference_duration = time.time() - start_time
+        
+        # Update Prometheus error metrics
+        PREDICTION_COUNTER.labels(
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION,
+            status='error'
+        ).inc()
+        
+        ERROR_COUNTER.labels(
+            model_name=MODEL_NAME,
+            model_version=MODEL_VERSION,
+            error_type=type(e).__name__
+        ).inc()
+        
         logger.error(f"Request {request_id} failed after {inference_duration*1000:.2f}ms: {traceback.format_exc()}")
         return {
             "error": str(e), 
@@ -355,3 +429,11 @@ def run(request_body):
                 "inference_time_ms": round(inference_duration * 1000, 2)
             }
         }
+
+
+def metrics():
+    """
+    Return Prometheus metrics in text format.
+    This endpoint is scraped by Prometheus for monitoring.
+    """
+    return generate_latest(REGISTRY).decode('utf-8'), 200, {'Content-Type': CONTENT_TYPE_LATEST}
