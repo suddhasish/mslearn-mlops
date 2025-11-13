@@ -216,13 +216,14 @@ jobs:
             --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
             --instance-type Standard_DS2_v2 \
             --instance-count 1 \
+            --code-configuration code=src scoring-script=score.py \
+            --environment azureml://registries/azureml/environments/sklearn-1.5/versions/1 \
             --all-traffic \
             --set environment_variables.DEPLOYMENT_ID="${{ needs.resolve-inputs.outputs.deployment_id }}" \
             --set environment_variables.MODEL_VERSION="${{ needs.resolve-inputs.outputs.model_version }}" \
             --tags environment=staging \
                    model_name="${{ needs.resolve-inputs.outputs.model_name }}" \
-                   model_version="${{ needs.resolve-inputs.outputs.model_version }}" \
-            --overwrite
+                   model_version="${{ needs.resolve-inputs.outputs.model_version }}"
 
       - name: Wait for staging deployment to be healthy
         id: wait_staging
