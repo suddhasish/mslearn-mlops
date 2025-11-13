@@ -399,7 +399,7 @@ jobs:
 
   deploy-production-aks:
     name: Deploy to Production (AKS)
-    needs: [resolve-inputs, deploy-staging]
+    needs: [resolve-inputs, deploy-staging, await-production-approval]
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -426,17 +426,35 @@ jobs:
           
           echo "Downloading model: ${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}"
           
-          mkdir -p src/model
+          # Download to temporary directory
+          TEMP_DIR=$(mktemp -d)
           
           az ml model download \
             --name "${{ needs.resolve-inputs.outputs.model_name }}" \
             --version "${{ needs.resolve-inputs.outputs.model_version }}" \
-            --download-path src/model \
+            --download-path "$TEMP_DIR" \
             --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
             --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
             --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}"
           
-          echo "✅ Model downloaded to src/model/"
+          echo "Downloaded model structure:"
+          find "$TEMP_DIR" -type f
+          
+          # Create model directory and copy model files
+          mkdir -p src/model
+          
+          # Find and copy the model file (usually in a nested directory)
+          MODEL_FILE=$(find "$TEMP_DIR" -type f \( -name "*.pkl" -o -name "*.joblib" -o -name "*.model" \) | head -n 1)
+          
+          if [ -z "$MODEL_FILE" ]; then
+            echo "❌ Error: No model file found in downloaded artifacts"
+            exit 1
+          fi
+          
+          echo "Found model file: $MODEL_FILE"
+          cp "$MODEL_FILE" src/model/model.pkl
+          
+          echo "✅ Model prepared at src/model/model.pkl"
           ls -la src/model/
 
       - name: Build and push Docker image to ACR
@@ -843,35 +861,34 @@ jobs:
           echo "**Next step**: Manual approval required to begin gradual traffic shift"
 
   await-production-approval:
-    name: 🔒 Await Production Approval (Managed Endpoints - Disabled)
-    needs: [resolve-inputs, deploy-staging, deploy-production-aks]
+    name: 🔒 Await Production Approval
+    needs: [resolve-inputs, deploy-staging]
     runs-on: ubuntu-latest
-    if: false  # Disabled: Using AKS for production
     environment:
-      name: production
-      url: https://portal.azure.com/#@/resource/subscriptions/${{ needs.resolve-inputs.outputs.subscription_id }}/resourceGroups/${{ needs.resolve-inputs.outputs.resource_group }}/providers/Microsoft.MachineLearningServices/workspaces/${{ needs.resolve-inputs.outputs.aml_workspace }}/endpoints/${{ env.AZURE_ML_PRODUCTION_ENDPOINT_NAME }}
+      name: production-approval  # GitHub environment protection rule required
+      url: ${{ needs.deploy-staging.outputs.endpoint_url }}
     steps:
       - name: Display approval information
         run: |
           echo "### 🔒 Production Deployment Approval Required" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Staging deployment**: Successful" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **GREEN deployment**: Created and tested in isolation" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Staging tests**: Passed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Deployment Details:**" >> $GITHUB_STEP_SUMMARY
           echo "- Model: ${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}" >> $GITHUB_STEP_SUMMARY
           echo "- Deployment ID: ${{ needs.resolve-inputs.outputs.deployment_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Endpoint: $AZURE_ML_PRODUCTION_ENDPOINT_NAME" >> $GITHUB_STEP_SUMMARY
           echo "- Staging URL: ${{ needs.deploy-staging.outputs.endpoint_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Production URL (AKS): http://${{ needs.deploy-production-aks.outputs.service_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Target: Production AKS Cluster (${{ needs.resolve-inputs.outputs.aks_cluster_name }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Rollout Plan:**" >> $GITHUB_STEP_SUMMARY
-          echo "1. Shift 10% traffic to GREEN → smoke test" >> $GITHUB_STEP_SUMMARY
-          echo "2. Shift 50% traffic to GREEN → smoke test" >> $GITHUB_STEP_SUMMARY
-          echo "3. Shift 100% traffic to GREEN → smoke test" >> $GITHUB_STEP_SUMMARY
-          echo "4. Automatic rollback to BLUE if any test fails" >> $GITHUB_STEP_SUMMARY
+          echo "**Production Deployment Plan:**" >> $GITHUB_STEP_SUMMARY
+          echo "1. Build Docker image with model embedded" >> $GITHUB_STEP_SUMMARY
+          echo "2. Push image to ACR (${{ needs.resolve-inputs.outputs.acr_name }})" >> $GITHUB_STEP_SUMMARY
+          echo "3. Deploy to AKS with rolling update strategy" >> $GITHUB_STEP_SUMMARY
+          echo "4. Expose via LoadBalancer service" >> $GITHUB_STEP_SUMMARY
+          echo "5. Run smoke tests against production endpoint" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "⚠️  **Approve this deployment to begin the gradual traffic rollout**"
+          echo "⚠️  **Approve this deployment to proceed with production rollout to AKS**"
 
   gradual-rollout:
     name: 🚀 Gradual Blue→Green Traffic Rollout (Managed Endpoints - Disabled)
