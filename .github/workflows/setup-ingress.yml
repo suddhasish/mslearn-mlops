@@ -1,0 +1,233 @@
+name: Setup Ingress & Dashboard Exposure
+
+on:
+  workflow_dispatch:
+    inputs:
+      grafana_domain:
+        description: 'Grafana domain (e.g., grafana.yourdomain.com)'
+        required: false
+        default: ''
+      prometheus_domain:
+        description: 'Prometheus domain (e.g., prometheus.yourdomain.com)'
+        required: false
+        default: ''
+      use_ip_access:
+        description: 'Use LoadBalancer IP instead of domain (true/false)'
+        required: false
+        default: 'true'
+
+env:
+  AZURE_SUBSCRIPTION_ID: b2b8a5e6-9a34-494b-ba62-fe9be95bd398
+  RESOURCE_GROUP: mlopsnew-dev-rg
+  AKS_CLUSTER: mlopsnew-dev-aks
+
+jobs:
+  setup-ingress:
+    name: Setup NGINX Ingress Controller
+    runs-on: ubuntu-latest
+    outputs:
+      ingress_ip: ${{ steps.get_ip.outputs.ip }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER }} \
+            --overwrite-existing
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Check if NGINX Ingress is installed
+        id: check_ingress
+        run: |
+          if helm list -n ingress-nginx | grep -q ingress-nginx; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ NGINX Ingress already installed"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install NGINX Ingress Controller
+        if: steps.check_ingress.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          
+          echo "🔧 Installing NGINX Ingress Controller..."
+          
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update
+          
+          kubectl create namespace ingress-nginx --dry-run=client -o yaml | kubectl apply -f -
+          
+          helm install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx \
+            --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz \
+            --set controller.service.externalTrafficPolicy=Local \
+            --set controller.metrics.enabled=true \
+            --set controller.metrics.serviceMonitor.enabled=true \
+            --wait --timeout=5m
+          
+          echo "✅ NGINX Ingress Controller installed"
+
+      - name: Wait for Ingress Controller
+        run: |
+          echo "Waiting for NGINX Ingress Controller pods..."
+          kubectl wait --namespace ingress-nginx \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller \
+            --timeout=300s
+
+      - name: Get LoadBalancer IP
+        id: get_ip
+        run: |
+          echo "Getting LoadBalancer external IP..."
+          
+          for i in {1..30}; do
+            INGRESS_IP=$(kubectl get service ingress-nginx-controller \
+              -n ingress-nginx \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            
+            if [ -n "$INGRESS_IP" ]; then
+              echo "ip=$INGRESS_IP" >> $GITHUB_OUTPUT
+              echo "✅ LoadBalancer IP: $INGRESS_IP"
+              break
+            fi
+            
+            echo "Waiting for LoadBalancer IP... ($i/30)"
+            sleep 10
+          done
+          
+          if [ -z "$INGRESS_IP" ]; then
+            echo "::error::Failed to get LoadBalancer IP"
+            exit 1
+          fi
+
+      - name: Install Cert-Manager (for SSL)
+        if: github.event.inputs.use_ip_access != 'true'
+        run: |
+          if helm list -n cert-manager | grep -q cert-manager; then
+            echo "⚠️ Cert-Manager already installed"
+            exit 0
+          fi
+          
+          echo "🔧 Installing Cert-Manager..."
+          
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+          
+          kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
+          
+          helm install cert-manager jetstack/cert-manager \
+            --namespace cert-manager \
+            --set installCRDs=true \
+            --wait --timeout=5m
+          
+          echo "✅ Cert-Manager installed"
+
+      - name: Create ClusterIssuer for Let's Encrypt
+        if: github.event.inputs.use_ip_access != 'true'
+        run: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: letsencrypt-prod
+          spec:
+            acme:
+              server: https://acme-v02.api.letsencrypt.org/directory
+              email: admin@yourdomain.com  # CHANGE THIS
+              privateKeySecretRef:
+                name: letsencrypt-prod
+              solvers:
+                - http01:
+                    ingress:
+                      class: nginx
+          EOF
+          
+          echo "✅ Let's Encrypt ClusterIssuer created"
+
+      - name: Display setup information
+        run: |
+          echo "### 🎉 NGINX Ingress Controller Setup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**LoadBalancer IP**: \`${{ steps.get_ip.outputs.ip }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ github.event.inputs.use_ip_access }}" == "true" ]; then
+            echo "## Access via IP Address (No DNS Required)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Grafana**: http://${{ steps.get_ip.outputs.ip }}/grafana" >> $GITHUB_STEP_SUMMARY
+            echo "**Prometheus**: http://${{ steps.get_ip.outputs.ip }}/prometheus" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Note**: HTTP only (no SSL)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## DNS Configuration Required" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Create these DNS A records:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "grafana.yourdomain.com    A    ${{ steps.get_ip.outputs.ip }}" >> $GITHUB_STEP_SUMMARY
+            echo "prometheus.yourdomain.com A    ${{ steps.get_ip.outputs.ip }}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "After DNS propagation:" >> $GITHUB_STEP_SUMMARY
+            echo "- **Grafana**: https://grafana.yourdomain.com" >> $GITHUB_STEP_SUMMARY
+            echo "- **Prometheus**: https://prometheus.yourdomain.com" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Configure OAuth2 Proxy for Azure AD authentication" >> $GITHUB_STEP_SUMMARY
+          echo "2. Apply ingress resources: \`kubectl apply -f kubernetes/ingress/\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. See \`DASHBOARD_EXPOSURE_GUIDE.md\` for full setup instructions" >> $GITHUB_STEP_SUMMARY
+
+  setup-oauth2:
+    name: Setup OAuth2 Proxy (Optional)
+    needs: setup-ingress
+    runs-on: ubuntu-latest
+    if: false  # Set to true to enable Azure AD authentication
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER }} \
+            --overwrite-existing
+
+      - name: Create OAuth2 Proxy Secret
+        run: |
+          # Generate cookie secret
+          COOKIE_SECRET=$(openssl rand -base64 32 | tr -d '\n')
+          
+          # Create secret (use GitHub secrets for real values)
+          kubectl create secret generic oauth2-proxy-secrets \
+            --namespace monitoring \
+            --from-literal=client-id='${{ secrets.AZURE_AD_CLIENT_ID }}' \
+            --from-literal=client-secret='${{ secrets.AZURE_AD_CLIENT_SECRET }}' \
+            --from-literal=cookie-secret="$COOKIE_SECRET" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "✅ OAuth2 Proxy secret created"
+
+      - name: Deploy OAuth2 Proxy
+        run: |
+          kubectl apply -f kubernetes/ingress/oauth2-proxy.yaml
+          echo "✅ OAuth2 Proxy deployed"

@@ -18,6 +18,22 @@ on:
         description: 'Model version (e.g., 1, 2, latest)'
         required: true
         default: 'latest'
+      setup_monitoring:
+        description: 'Setup Prometheus + Grafana monitoring stack? (first-time only)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      setup_ingress:
+        description: 'Setup NGINX Ingress for dashboard access? (first-time only)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
   repository_dispatch:
     types: [aml_model_registered]
 
@@ -974,6 +990,271 @@ jobs:
           echo "5. Run smoke tests against production endpoint" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "⚠️  **Approve this deployment to proceed with production rollout to AKS**"
+
+  setup-monitoring-stack:
+    name: 📊 Setup Monitoring Stack (Optional)
+    needs: [resolve-inputs, await-production-approval]
+    runs-on: ubuntu-latest
+    if: inputs.setup_monitoring == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ needs.resolve-inputs.outputs.resource_group }} \
+            --name ${{ needs.resolve-inputs.outputs.aks_cluster_name }} \
+            --overwrite-existing
+          echo "✅ AKS credentials configured"
+
+      - name: Add Helm repositories
+        run: |
+          echo "📦 Adding Helm repositories..."
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+          echo "✅ Helm repositories added"
+
+      - name: Install cert-manager
+        run: |
+          echo "🔐 Installing cert-manager..."
+          
+          # Check if cert-manager is already installed
+          if helm list -n cert-manager | grep -q cert-manager; then
+            echo "⏭️  cert-manager already installed"
+          else
+            kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
+            
+            helm install cert-manager jetstack/cert-manager \
+              --namespace cert-manager \
+              --version v1.13.2 \
+              --set installCRDs=true \
+              --wait --timeout 5m
+            
+            echo "✅ cert-manager installed"
+          fi
+
+      - name: Install Prometheus + Grafana stack
+        run: |
+          echo "📊 Installing kube-prometheus-stack..."
+          
+          # Check if prometheus is already installed
+          if helm list -n monitoring | grep -q kube-prometheus-stack; then
+            echo "⏭️  kube-prometheus-stack already installed"
+          else
+            kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+            
+            helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+              --namespace monitoring \
+              --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+              --set grafana.adminPassword=Admin123! \
+              --set grafana.service.type=LoadBalancer \
+              --set prometheus.service.type=LoadBalancer \
+              --wait --timeout 10m
+            
+            echo "✅ kube-prometheus-stack installed"
+          fi
+
+      - name: Wait for Prometheus Operator
+        run: |
+          echo "⏳ Waiting for Prometheus Operator to be ready..."
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=prometheus-operator \
+            -n monitoring \
+            --timeout=300s || true
+          
+          echo "Prometheus Operator pods:"
+          kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-operator
+
+      - name: Apply ServiceMonitor and Alerts
+        run: |
+          echo "📈 Applying ServiceMonitor and Alert rules..."
+          
+          # Wait a bit more for CRDs to be fully registered
+          sleep 10
+          
+          # Apply ServiceMonitor
+          if kubectl apply -f kubernetes/ml-inference-servicemonitor.yaml; then
+            echo "✅ ServiceMonitor applied"
+          else
+            echo "⚠️  ServiceMonitor failed (will retry in 30s)"
+            sleep 30
+            kubectl apply -f kubernetes/ml-inference-servicemonitor.yaml
+          fi
+          
+          # Apply Alert Rules
+          if kubectl apply -f kubernetes/ml-inference-alerts.yaml; then
+            echo "✅ Alert rules applied"
+          else
+            echo "⚠️  Alert rules failed (will retry in 30s)"
+            sleep 30
+            kubectl apply -f kubernetes/ml-inference-alerts.yaml
+          fi
+
+      - name: Import Grafana Dashboard
+        run: |
+          echo "📊 Waiting for Grafana to be ready..."
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=grafana \
+            -n monitoring \
+            --timeout=300s || true
+          
+          echo "Grafana pods:"
+          kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana
+          
+          echo ""
+          echo "ℹ️  To import the ML Inference dashboard:"
+          echo "   1. Access Grafana (see below for URL)"
+          echo "   2. Go to Dashboards → Import"
+          echo "   3. Upload kubernetes/grafana-dashboard.json"
+          echo "   4. Select Prometheus data source"
+
+      - name: Display access information
+        run: |
+          echo "### 📊 Monitoring Stack Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Components Installed:**" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Prometheus Operator" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Prometheus Server" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Grafana" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ cert-manager" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ ServiceMonitor (ML Inference metrics)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Alert Rules (Error rate, Latency)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Get Grafana LoadBalancer IP
+          echo "⏳ Waiting for Grafana LoadBalancer IP..."
+          for i in {1..30}; do
+            GRAFANA_IP=$(kubectl get svc -n monitoring kube-prometheus-stack-grafana -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            if [ -n "$GRAFANA_IP" ]; then
+              echo "GRAFANA_URL=http://$GRAFANA_IP" >> $GITHUB_ENV
+              echo "**Access URLs:**" >> $GITHUB_STEP_SUMMARY
+              echo "- 📊 Grafana: http://$GRAFANA_IP (admin / Admin123!)" >> $GITHUB_STEP_SUMMARY
+              break
+            fi
+            sleep 10
+          done
+          
+          if [ -z "$GRAFANA_IP" ]; then
+            echo "⚠️  **Grafana LoadBalancer IP not ready yet**" >> $GITHUB_STEP_SUMMARY
+            echo "   Run: \`kubectl get svc -n monitoring kube-prometheus-stack-grafana\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Steps:**" >> $GITHUB_STEP_SUMMARY
+          echo "1. Access Grafana using the URL above" >> $GITHUB_STEP_SUMMARY
+          echo "2. Import dashboard from \`kubernetes/grafana-dashboard.json\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. (Optional) Setup NGINX Ingress with OAuth2 for secure access" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ℹ️  To setup ingress, set \`setup_ingress: true\` in next run" >> $GITHUB_STEP_SUMMARY
+
+  setup-ingress-dashboards:
+    name: 🌐 Setup Dashboard Ingress (Optional)
+    needs: [resolve-inputs, await-production-approval, setup-monitoring-stack]
+    runs-on: ubuntu-latest
+    if: inputs.setup_ingress == 'true' && inputs.setup_monitoring == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ needs.resolve-inputs.outputs.resource_group }} \
+            --name ${{ needs.resolve-inputs.outputs.aks_cluster_name }} \
+            --overwrite-existing
+
+      - name: Install NGINX Ingress Controller
+        run: |
+          echo "🌐 Installing NGINX Ingress Controller..."
+          
+          if helm list -n ingress-nginx | grep -q ingress-nginx; then
+            echo "⏭️  NGINX Ingress already installed"
+          else
+            kubectl create namespace ingress-nginx --dry-run=client -o yaml | kubectl apply -f -
+            
+            helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+            helm repo update
+            
+            helm install ingress-nginx ingress-nginx/ingress-nginx \
+              --namespace ingress-nginx \
+              --set controller.service.type=LoadBalancer \
+              --wait --timeout 10m
+            
+            echo "✅ NGINX Ingress Controller installed"
+          fi
+
+      - name: Deploy OAuth2 Proxy
+        run: |
+          echo "🔐 Deploying OAuth2 Proxy..."
+          
+          # Create secret with Azure AD credentials (if secrets are configured)
+          if [ -n "${{ secrets.AZURE_AD_CLIENT_ID }}" ] && [ -n "${{ secrets.AZURE_AD_CLIENT_SECRET }}" ]; then
+            kubectl create secret generic oauth2-proxy-secrets \
+              --from-literal=client-id="${{ secrets.AZURE_AD_CLIENT_ID }}" \
+              --from-literal=client-secret="${{ secrets.AZURE_AD_CLIENT_SECRET }}" \
+              --from-literal=cookie-secret="$(openssl rand -base64 32)" \
+              --namespace monitoring \
+              --dry-run=client -o yaml | kubectl apply -f -
+            
+            kubectl apply -f kubernetes/ingress/oauth2-proxy.yaml
+            echo "✅ OAuth2 Proxy deployed with Azure AD"
+          else
+            echo "⚠️  AZURE_AD_CLIENT_ID and AZURE_AD_CLIENT_SECRET not configured"
+            echo "   Skipping OAuth2 Proxy deployment"
+            echo "   Add these secrets to enable Azure AD authentication"
+          fi
+
+      - name: Apply Ingress Rules
+        run: |
+          echo "🌐 Applying Ingress rules..."
+          
+          # Apply Grafana Ingress
+          kubectl apply -f kubernetes/ingress/grafana-ingress.yaml || echo "⚠️  Grafana ingress failed (check cert-manager ClusterIssuer)"
+          
+          # Apply Prometheus Ingress
+          kubectl apply -f kubernetes/ingress/prometheus-ingress.yaml || echo "⚠️  Prometheus ingress failed (check cert-manager ClusterIssuer)"
+          
+          echo "✅ Ingress rules applied"
+
+      - name: Get Ingress IP
+        run: |
+          echo "⏳ Waiting for Ingress Controller IP..."
+          for i in {1..30}; do
+            INGRESS_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            if [ -n "$INGRESS_IP" ]; then
+              echo "### 🌐 Dashboard Ingress Deployed" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Ingress Controller IP:** $INGRESS_IP" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Setup Instructions:**" >> $GITHUB_STEP_SUMMARY
+              echo "1. Add DNS records:" >> $GITHUB_STEP_SUMMARY
+              echo "   - grafana.yourdomain.com → $INGRESS_IP" >> $GITHUB_STEP_SUMMARY
+              echo "   - prometheus.yourdomain.com → $INGRESS_IP" >> $GITHUB_STEP_SUMMARY
+              echo "2. Update ingress files with your domain names" >> $GITHUB_STEP_SUMMARY
+              echo "3. Configure Azure AD app registration for OAuth2" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "ℹ️  See \`DASHBOARD_EXPOSURE_GUIDE.md\` for detailed setup" >> $GITHUB_STEP_SUMMARY
+              break
+            fi
+            sleep 10
+          done
+          
+          if [ -z "$INGRESS_IP" ]; then
+            echo "⚠️  Ingress IP not ready yet" >> $GITHUB_STEP_SUMMARY
+            echo "   Run: \`kubectl get svc -n ingress-nginx\`" >> $GITHUB_STEP_SUMMARY
+          fi
 
   gradual-rollout:
     name: 🚀 Gradual Blue→Green Traffic Rollout (Managed Endpoints - Disabled)

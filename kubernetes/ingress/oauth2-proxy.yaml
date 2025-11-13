@@ -1,0 +1,140 @@
+# OAuth2 Proxy for Azure AD Authentication
+# This provides SSO for Grafana and Prometheus
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: monitoring
+  labels:
+    app: oauth2-proxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: oauth2-proxy
+    spec:
+      containers:
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.5.1
+          args:
+            # Provider Configuration
+            - --provider=azure
+            - --azure-tenant=<YOUR_TENANT_ID>  # CHANGE THIS
+            
+            # Client Configuration
+            - --client-id=$(OAUTH2_PROXY_CLIENT_ID)
+            - --client-secret=$(OAUTH2_PROXY_CLIENT_SECRET)
+            - --cookie-secret=$(OAUTH2_PROXY_COOKIE_SECRET)
+            
+            # URL Configuration
+            - --redirect-url=https://grafana.yourdomain.com/oauth2/callback  # CHANGE THIS
+            - --oidc-issuer-url=https://login.microsoftonline.com/<YOUR_TENANT_ID>/v2.0  # CHANGE THIS
+            
+            # Email Domain Restriction (optional)
+            # - --email-domain=yourdomain.com  # Only allow your company emails
+            
+            # Session Configuration
+            - --cookie-secure=true
+            - --cookie-httponly=true
+            - --cookie-expire=12h
+            - --cookie-refresh=1h
+            
+            # Authentication Settings
+            - --pass-access-token=true
+            - --pass-authorization-header=true
+            - --set-authorization-header=true
+            - --set-xauthrequest=true
+            
+            # Upstream Configuration
+            - --upstream=static://200  # We use ingress for upstreams
+            - --http-address=0.0.0.0:4180
+            
+            # Logging
+            - --auth-logging=true
+            - --request-logging=true
+            - --standard-logging=true
+            
+            # Skip authentication for health endpoints
+            - --skip-auth-route=^/health$
+            - --skip-auth-route=^/ready$
+          
+          env:
+            - name: OAUTH2_PROXY_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy-secrets
+                  key: client-id
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy-secrets
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy-secrets
+                  key: cookie-secret
+          
+          ports:
+            - containerPort: 4180
+              name: http
+              protocol: TCP
+          
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          
+          resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: monitoring
+  labels:
+    app: oauth2-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: oauth2-proxy
+  ports:
+    - port: 4180
+      targetPort: http
+      protocol: TCP
+      name: http
+---
+# Secret template - create this with actual values
+# kubectl create secret generic oauth2-proxy-secrets -n monitoring \
+#   --from-literal=client-id='<AZURE_AD_CLIENT_ID>' \
+#   --from-literal=client-secret='<AZURE_AD_CLIENT_SECRET>' \
+#   --from-literal=cookie-secret='<RANDOM_32_CHAR_STRING>'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oauth2-proxy-secrets
+  namespace: monitoring
+type: Opaque
+stringData:
+  client-id: "REPLACE_WITH_AZURE_AD_CLIENT_ID"
+  client-secret: "REPLACE_WITH_AZURE_AD_CLIENT_SECRET"
+  cookie-secret: "REPLACE_WITH_RANDOM_32_CHARS"  # Generate with: openssl rand -base64 32
