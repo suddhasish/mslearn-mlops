@@ -1,0 +1,17 @@
+# Example configuration for using existing AKS cluster
+# Copy this to terraform.tfvars and update with your values
+
+project_name = "mlopsnew"
+location     = "eastus"
+
+# Use existing AKS cluster
+use_existing_aks            = true
+existing_aks_name           = "your-aks-cluster-name"
+existing_aks_resource_group = "your-aks-resource-group"
+
+# Disable new AKS creation when using existing cluster
+enable_aks_deployment = true
+
+# Other settings
+enable_private_endpoints = false
+enable_purge_protection  = false

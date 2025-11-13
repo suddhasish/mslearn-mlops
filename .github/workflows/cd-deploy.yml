@@ -40,10 +40,8 @@ env:
   AZURE_ML_STAGING_ENDPOINT_NAME: ml-endpoint-staging
   STAGING_DEPLOYMENT_NAME: staging-deployment
   
-  # Production deployment: AKS cluster
-  AKS_CLUSTER_NAME: mlopsnew-dev-aks
+  # Production deployment: AKS cluster (will be resolved dynamically)
   AKS_NAMESPACE: production
-  ACR_NAME: mlopsnewdevacr
   
   # Deployment configuration
   MAX_WAIT_ITERATIONS: 30
@@ -61,10 +59,31 @@ jobs:
       resource_group: ${{ steps.resolve.outputs.resource_group }}
       subscription_id: ${{ steps.resolve.outputs.subscription_id }}
       deployment_id: ${{ steps.resolve.outputs.deployment_id }}
+      aks_cluster_name: ${{ steps.get_infrastructure.outputs.aks_cluster_name }}
+      acr_name: ${{ steps.get_infrastructure.outputs.acr_name }}
     steps:
       - name: Generate deployment ID
         id: deployment_id
         run: echo "id=deploy-$(date +%Y%m%d-%H%M%S)-${{ github.run_id }}" >> $GITHUB_OUTPUT
+
+      - name: Get infrastructure details
+        id: get_infrastructure
+        run: |
+          # Query AKS cluster name from resource group
+          AKS_NAME=$(az aks list --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}" \
+            --query "[0].name" -o tsv)
+          
+          # Query ACR name from resource group
+          ACR_NAME=$(az acr list --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}" \
+            --query "[0].name" -o tsv)
+          
+          echo "aks_cluster_name=$AKS_NAME" >> $GITHUB_OUTPUT
+          echo "acr_name=$ACR_NAME" >> $GITHUB_OUTPUT
+          
+          echo "Found AKS cluster: $AKS_NAME"
+          echo "Found ACR: $ACR_NAME"
 
       - name: Resolve all inputs
         id: resolve
@@ -88,10 +107,12 @@ jobs:
           echo "| Resource Group | ${{ steps.resolve.outputs.resource_group }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ML Workspace | ${{ steps.resolve.outputs.aml_workspace }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Subscription | ${{ steps.resolve.outputs.subscription_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AKS Cluster | ${{ steps.get_infrastructure.outputs.aks_cluster_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ACR | ${{ steps.get_infrastructure.outputs.acr_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Endpoints:**" >> $GITHUB_STEP_SUMMARY
           echo "- Staging: `${{ env.AZURE_ML_STAGING_ENDPOINT_NAME }}` (Managed Online Endpoint)" >> $GITHUB_STEP_SUMMARY
-          echo "- Production: `${{ env.AKS_CLUSTER_NAME }}/${{ env.AKS_NAMESPACE }}` (AKS Cluster)" >> $GITHUB_STEP_SUMMARY
+          echo "- Production: `${{ steps.get_infrastructure.outputs.aks_cluster_name }}/${{ env.AKS_NAMESPACE }}` (AKS Cluster)" >> $GITHUB_STEP_SUMMARY
 
       - name: Log deployment configuration
         run: |
@@ -357,16 +378,17 @@ jobs:
           ls -la src/model/
 
       - name: Build and push Docker image to ACR
+        id: build_image
         run: |
           set -euo pipefail
           
           echo "Building Docker image for AKS deployment..."
           
           # Login to ACR
-          az acr login --name ${{ env.ACR_NAME }}
+          az acr login --name ${{ needs.resolve-inputs.outputs.acr_name }}
           
           # Get ACR login server
-          ACR_LOGIN_SERVER=$(az acr show --name ${{ env.ACR_NAME }} --query loginServer -o tsv)
+          ACR_LOGIN_SERVER=$(az acr show --name ${{ needs.resolve-inputs.outputs.acr_name }} --query loginServer -o tsv)
           
           # Build image with timestamp tag
           IMAGE_TAG="v${{ needs.resolve-inputs.outputs.model_version }}-$(date +%Y%m%d%H%M%S)"
@@ -387,14 +409,14 @@ jobs:
           docker push "$IMAGE_NAME"
           docker push "$IMAGE_LATEST"
           
-          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
           echo "✅ Image pushed: $IMAGE_NAME"
 
       - name: Get AKS credentials
         run: |
           az aks get-credentials \
             --resource-group ${{ needs.resolve-inputs.outputs.resource_group }} \
-            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --name ${{ needs.resolve-inputs.outputs.aks_cluster_name }} \
             --overwrite-existing
           
           echo "✅ AKS credentials configured"
@@ -409,7 +431,7 @@ jobs:
           set -euo pipefail
           
           # Update image and environment variables in deployment manifest
-          sed -i "s|image: .*azurecr.io/ml-inference:.*|image: ${{ env.IMAGE_NAME }}|g" kubernetes/ml-inference-deployment.yaml
+          sed -i "s|image: .*azurecr.io/ml-inference:.*|image: ${{ steps.build_image.outputs.image_name }}|g" kubernetes/ml-inference-deployment.yaml
           sed -i "s|value: \"latest\"|value: \"${{ needs.resolve-inputs.outputs.model_version }}\"|g" kubernetes/ml-inference-deployment.yaml
           sed -i "s|value: \"diabetes_classification\"|value: \"${{ needs.resolve-inputs.outputs.model_name }}\"|g" kubernetes/ml-inference-deployment.yaml
           
@@ -425,7 +447,7 @@ jobs:
           if kubectl get deployment ml-inference -n ${{ env.AKS_NAMESPACE }} >/dev/null 2>&1; then
             echo "Deployment exists - performing rolling update..."
             kubectl set image deployment/ml-inference \
-              inference="${{ env.IMAGE_NAME }}" \
+              inference="${{ steps.build_image.outputs.image_name }}" \
               -n ${{ env.AKS_NAMESPACE }}
           else
             echo "Creating new deployment..."
@@ -495,8 +517,8 @@ jobs:
           echo "### 🚀 Production Deployment (AKS) - Completed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Model**: ${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Image**: ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Cluster**: ${{ env.AKS_CLUSTER_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: ${{ steps.build_image.outputs.image_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cluster**: ${{ needs.resolve-inputs.outputs.aks_cluster_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Namespace**: ${{ env.AKS_NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ steps.get_service_ip.outputs.EXTERNAL_IP }}" != "pending" ]; then
