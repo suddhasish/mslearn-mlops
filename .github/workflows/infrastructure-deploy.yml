@@ -812,7 +812,7 @@ jobs:
   # Export infrastructure outputs as GitHub Variables for ML pipelines
   export-dev-outputs:
     name: Export DEV Outputs to GitHub Variables
-    needs: dev-apply
+    needs: terraform-apply-dev
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/deployment-pipeline')
     runs-on: ubuntu-latest
     steps:
@@ -877,7 +877,7 @@ jobs:
 
   export-prod-outputs:
     name: Export PROD Outputs to GitHub Variables
-    needs: prod-apply
+    needs: terraform-apply-prod
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/deployment-pipeline')
     runs-on: ubuntu-latest
     steps:
