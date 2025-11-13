@@ -200,6 +200,18 @@ jobs:
           
           echo "✓ Endpoint already exists and is healthy"
 
+      - name: Prepare deployment configuration
+        run: |
+          set -euo pipefail
+          
+          # Update deployment YAML with dynamic values
+          sed -i "s|model: azureml:.*|model: azureml:${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}|g" deployment/staging-deployment.yml
+          sed -i "s|DEPLOYMENT_ID: \".*\"|DEPLOYMENT_ID: \"${{ needs.resolve-inputs.outputs.deployment_id }}\"|g" deployment/staging-deployment.yml
+          sed -i "s|MODEL_VERSION: \".*\"|MODEL_VERSION: \"${{ needs.resolve-inputs.outputs.model_version }}\"|g" deployment/staging-deployment.yml
+          
+          echo "Updated deployment configuration:"
+          cat deployment/staging-deployment.yml
+
       - name: Deploy model to staging
         id: deploy_staging
         run: |
@@ -208,22 +220,11 @@ jobs:
           echo "Deploying model ${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}"
           
           az ml online-deployment create \
-            --endpoint-name "$AZURE_ML_STAGING_ENDPOINT_NAME" \
-            --name "$STAGING_DEPLOYMENT_NAME" \
-            --model "${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}" \
+            --file deployment/staging-deployment.yml \
             --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
             --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
             --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
-            --instance-type Standard_DS2_v2 \
-            --instance-count 1 \
-            --code-configuration code=src scoring-script=score.py \
-            --environment azureml://registries/azureml/environments/sklearn-1.5/versions/1 \
-            --all-traffic \
-            --set environment_variables.DEPLOYMENT_ID="${{ needs.resolve-inputs.outputs.deployment_id }}" \
-            --set environment_variables.MODEL_VERSION="${{ needs.resolve-inputs.outputs.model_version }}" \
-            --tags environment=staging \
-                   model_name="${{ needs.resolve-inputs.outputs.model_name }}" \
-                   model_version="${{ needs.resolve-inputs.outputs.model_version }}"
+            --all-traffic
 
       - name: Wait for staging deployment to be healthy
         id: wait_staging

@@ -1,0 +1,13 @@
+$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineDeployment.schema.json
+name: staging-deployment
+endpoint_name: ml-endpoint-staging
+model: azureml:diabetes_classification:latest
+code_configuration:
+  code: ./src
+  scoring_script: score.py
+environment: azureml://registries/azureml/environments/sklearn-1.5/versions/1
+instance_type: Standard_DS2_v2
+instance_count: 1
+environment_variables:
+  DEPLOYMENT_ID: ""
+  MODEL_VERSION: ""
