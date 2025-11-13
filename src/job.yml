@@ -12,7 +12,7 @@ inputs:
   training_data:
     type: uri_folder
     # replace this with your datastore path or local folder containing CSVs
-    path: azureml:diabetes-dev-folder@latest
+    path: azureml:diabetes-dev-folder@latest 
 outputs:
   model:
     type: uri_folder
