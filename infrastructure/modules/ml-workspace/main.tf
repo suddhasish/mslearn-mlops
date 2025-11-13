@@ -127,23 +127,3 @@ resource "azurerm_machine_learning_compute_cluster" "gpu_cluster" {
 
   tags = var.tags
 }
-
-# AKS Compute Attachment (using azurerm_machine_learning_inference_cluster)
-# Note: This attaches an existing AKS cluster to Azure ML workspace
-resource "azurerm_machine_learning_inference_cluster" "aks_compute" {
-  count                         = var.enable_aks_compute && var.aks_cluster_id != null ? 1 : 0
-  name                          = "aks-compute"
-  location                      = var.location
-  machine_learning_workspace_id = azurerm_machine_learning_workspace.workspace.id
-  kubernetes_cluster_id         = var.aks_cluster_id
-  cluster_purpose               = "FastProd"
-
-  identity {
-    type = "SystemAssigned"
-  }
-
-  tags = merge(var.tags, {
-    compute_type = "aks"
-    description  = "AKS cluster attached as Azure ML compute for training and inference"
-  })
-}
