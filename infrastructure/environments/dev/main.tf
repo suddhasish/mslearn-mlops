@@ -149,26 +149,32 @@ module "aks" {
 }
 
 # AKS Compute Attachment to Azure ML Workspace
-# This attaches the AKS cluster as a compute target in Azure ML
-resource "azurerm_machine_learning_inference_cluster" "aks_compute" {
-  count                         = var.enable_aks_deployment ? 1 : 0
-  name                          = "aks-compute"
-  location                      = azurerm_resource_group.mlops.location
-  machine_learning_workspace_id = module.ml_workspace.workspace_id
-  kubernetes_cluster_id         = module.aks.cluster_id
-  cluster_purpose               = "FastProd"
-
-  identity {
-    type = "SystemAssigned"
-  }
-
-  tags = merge(local.common_tags, {
-    compute_type = "aks"
-    description  = "AKS cluster attached as Azure ML compute for training and inference"
-  })
-
-  depends_on = [module.ml_workspace, module.aks]
-}
+# Note: Disabled because azurerm_machine_learning_inference_cluster requires
+# specific node pool configuration (Azure ML system requirements).
+# For production deployment to AKS, we use kubectl directly in the CD workflow.
+# If you need to attach AKS as Azure ML compute for training, use Azure CLI:
+# az ml compute attach --name aks-compute --type kubernetes --resource-id <AKS_ID> \
+#   --workspace-name <WORKSPACE> --resource-group <RG>
+#
+# resource "azurerm_machine_learning_inference_cluster" "aks_compute" {
+#   count                         = var.enable_aks_deployment ? 1 : 0
+#   name                          = "aks-compute"
+#   location                      = azurerm_resource_group.mlops.location
+#   machine_learning_workspace_id = module.ml_workspace.workspace_id
+#   kubernetes_cluster_id         = module.aks.cluster_id
+#   cluster_purpose               = "FastProd"
+#
+#   identity {
+#     type = "SystemAssigned"
+#   }
+#
+#   tags = merge(local.common_tags, {
+#     compute_type = "aks"
+#     description  = "AKS cluster attached as Azure ML compute for training and inference"
+#   })
+#
+#   depends_on = [module.ml_workspace, module.aks]
+# }
 
 # ============================================================================
 # SECURITY & IDENTITY MODULES (Optional for DEV)
