@@ -62,6 +62,18 @@ variable "enable_gpu_compute" {
   default     = false
 }
 
+variable "aks_cluster_id" {
+  description = "AKS Cluster ID to attach as compute"
+  type        = string
+  default     = null
+}
+
+variable "enable_aks_compute" {
+  description = "Enable AKS as Azure ML compute target"
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

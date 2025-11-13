@@ -119,7 +119,11 @@ module "ml_workspace" {
   enable_purge_protection  = var.enable_purge_protection
   ml_compute_name          = var.ml_compute_name
   enable_gpu_compute       = var.enable_gpu_compute
+  aks_cluster_id           = module.aks.cluster_id
+  enable_aks_compute       = var.enable_aks_deployment
   tags                     = local.common_tags
+
+  depends_on = [module.aks]
 }
 
 # AKS Module
