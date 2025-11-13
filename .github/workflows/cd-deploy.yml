@@ -236,19 +236,42 @@ jobs:
           echo "Updated deployment configuration:"
           cat deployment/staging-deployment.yml
 
-      - name: Deploy model to staging
+      - name: Check if deployment exists
+        id: check_deployment
+        continue-on-error: true
+        run: |
+          az ml online-deployment show \
+            --endpoint-name "$AZURE_ML_STAGING_ENDPOINT_NAME" \
+            --name "$STAGING_DEPLOYMENT_NAME" \
+            --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
+            --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
+            --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
+            --query name -o tsv
+
+      - name: Create or update staging deployment
         id: deploy_staging
         run: |
           set -euo pipefail
           
           echo "Deploying model ${{ needs.resolve-inputs.outputs.model_name }}:${{ needs.resolve-inputs.outputs.model_version }}"
           
-          az ml online-deployment create \
-            --file deployment/staging-deployment.yml \
-            --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
-            --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
-            --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
-            --all-traffic
+          if [ "${{ steps.check_deployment.outcome }}" = "success" ]; then
+            echo "Deployment exists - updating..."
+            az ml online-deployment update \
+              --file deployment/staging-deployment.yml \
+              --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
+              --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
+              --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
+              --all-traffic
+          else
+            echo "Creating new deployment..."
+            az ml online-deployment create \
+              --file deployment/staging-deployment.yml \
+              --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
+              --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
+              --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
+              --all-traffic
+          fi
 
       - name: Wait for staging deployment to be healthy
         id: wait_staging
