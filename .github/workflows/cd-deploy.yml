@@ -190,13 +190,23 @@ jobs:
           az config set extension.use_dynamic_install=yes_without_prompt
           az extension add --name ml --yes --upgrade
 
-      - name: Create or update staging endpoint
-        id: create_staging_endpoint
+      - name: Check if endpoint exists
+        id: check_endpoint
         continue-on-error: true
+        run: |
+          az ml online-endpoint show \
+            --name "$AZURE_ML_STAGING_ENDPOINT_NAME" \
+            --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
+            --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
+            --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
+            --query name -o tsv
+
+      - name: Create staging endpoint if needed
+        if: steps.check_endpoint.outcome == 'failure'
         run: |
           set -euo pipefail
           
-          echo "Creating/updating staging endpoint: $AZURE_ML_STAGING_ENDPOINT_NAME"
+          echo "Creating staging endpoint: $AZURE_ML_STAGING_ENDPOINT_NAME"
           
           az ml online-endpoint create \
             --name "$AZURE_ML_STAGING_ENDPOINT_NAME" \
@@ -204,25 +214,13 @@ jobs:
             --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
             --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
             --auth-mode key
+          
+          echo "✓ Endpoint created successfully"
 
-      - name: Handle endpoint creation result
-        if: steps.create_staging_endpoint.outcome == 'failure'
+      - name: Verify endpoint status
+        if: steps.check_endpoint.outcome == 'success'
         run: |
-          echo "::warning::Endpoint may already exist - verifying status..."
-          
-          status=$(az ml online-endpoint show \
-            --name "$AZURE_ML_STAGING_ENDPOINT_NAME" \
-            --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
-            --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
-            --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
-            --query provisioning_state -o tsv)
-          
-          if [ "$status" != "Succeeded" ]; then
-            echo "::error::Endpoint exists but is in $status state"
-            exit 1
-          fi
-          
-          echo "✓ Endpoint already exists and is healthy"
+          echo "✓ Endpoint already exists, skipping creation"
 
       - name: Prepare deployment configuration
         run: |
@@ -261,8 +259,7 @@ jobs:
               --file deployment/staging-deployment.yml \
               --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
               --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
-              --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
-              --all-traffic
+              --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}"
           else
             echo "Creating new deployment..."
             az ml online-deployment create \
@@ -272,6 +269,17 @@ jobs:
               --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
               --all-traffic
           fi
+
+      - name: Route all traffic to staging deployment
+        if: steps.check_deployment.outcome == 'success'
+        run: |
+          echo "Routing 100% traffic to staging deployment..."
+          az ml online-endpoint update \
+            --name "$AZURE_ML_STAGING_ENDPOINT_NAME" \
+            --workspace-name "${{ needs.resolve-inputs.outputs.aml_workspace }}" \
+            --resource-group "${{ needs.resolve-inputs.outputs.resource_group }}" \
+            --subscription "${{ needs.resolve-inputs.outputs.subscription_id }}" \
+            --traffic "$STAGING_DEPLOYMENT_NAME=100"
 
       - name: Wait for staging deployment to be healthy
         id: wait_staging
