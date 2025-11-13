@@ -810,10 +810,11 @@ jobs:
           echo "| Key Vault | $(jq -r '.key_vault_name.value' outputs-prod.json) |" >> $GITHUB_STEP_SUMMARY
 
   # Export infrastructure outputs as GitHub Variables for ML pipelines
+  # Disabled: cd-deploy.yml now queries Azure directly for infrastructure details
   export-dev-outputs:
     name: Export DEV Outputs to GitHub Variables
     needs: terraform-apply-dev
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/deployment-pipeline')
+    if: false  # Disabled: cd-deploy.yml queries Azure at runtime instead of using GitHub Variables
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -878,7 +879,7 @@ jobs:
   export-prod-outputs:
     name: Export PROD Outputs to GitHub Variables
     needs: terraform-apply-prod
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/deployment-pipeline')
+    if: false  # Disabled: cd-deploy.yml queries Azure at runtime instead of using GitHub Variables
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

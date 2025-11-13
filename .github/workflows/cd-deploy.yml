@@ -62,6 +62,11 @@ jobs:
       aks_cluster_name: ${{ steps.get_infrastructure.outputs.aks_cluster_name }}
       acr_name: ${{ steps.get_infrastructure.outputs.acr_name }}
     steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Generate deployment ID
         id: deployment_id
         run: echo "id=deploy-$(date +%Y%m%d-%H%M%S)-${{ github.run_id }}" >> $GITHUB_OUTPUT
