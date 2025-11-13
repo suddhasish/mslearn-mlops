@@ -558,10 +558,20 @@ jobs:
           set -euo pipefail
           
           echo "Waiting for deployment rollout..."
-          kubectl rollout status deployment/ml-inference -n ${{ env.AKS_NAMESPACE }} --timeout=10m
           
-          echo "status=succeeded" >> $GITHUB_OUTPUT
-          echo "✅ Rollout completed successfully"
+          # Increase timeout and add progress feedback
+          if kubectl rollout status deployment/ml-inference -n ${{ env.AKS_NAMESPACE }} --timeout=15m; then
+            echo "status=succeeded" >> $GITHUB_OUTPUT
+            echo "✅ Rollout completed successfully"
+          else
+            echo "❌ Rollout timed out or failed"
+            echo "Pod status:"
+            kubectl get pods -n ${{ env.AKS_NAMESPACE }} -l app=ml-inference
+            echo ""
+            echo "Recent events:"
+            kubectl get events -n ${{ env.AKS_NAMESPACE }} --sort-by='.lastTimestamp' | tail -20
+            exit 1
+          fi
 
       - name: Setup monitoring (ServiceMonitor and Alerts)
         run: |
@@ -1050,13 +1060,21 @@ jobs:
           else
             kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
             
+            # Install with increased timeout and reduced resource requirements
             helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
               --namespace monitoring \
               --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+              --set prometheus.prometheusSpec.resources.requests.memory=200Mi \
+              --set prometheus.prometheusSpec.resources.limits.memory=1Gi \
               --set grafana.adminPassword=Admin123! \
               --set grafana.service.type=LoadBalancer \
+              --set grafana.resources.requests.memory=100Mi \
+              --set grafana.resources.limits.memory=500Mi \
               --set prometheus.service.type=LoadBalancer \
-              --wait --timeout 10m
+              --set alertmanager.enabled=true \
+              --set alertmanager.alertmanagerSpec.resources.requests.memory=100Mi \
+              --set alertmanager.alertmanagerSpec.resources.limits.memory=500Mi \
+              --wait --timeout 20m
             
             echo "✅ kube-prometheus-stack installed"
           fi
@@ -1064,13 +1082,24 @@ jobs:
       - name: Wait for Prometheus Operator
         run: |
           echo "⏳ Waiting for Prometheus Operator to be ready..."
-          kubectl wait --for=condition=ready pod \
-            -l app.kubernetes.io/name=prometheus-operator \
-            -n monitoring \
-            --timeout=300s || true
           
-          echo "Prometheus Operator pods:"
-          kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-operator
+          # Wait with retries
+          for i in {1..10}; do
+            if kubectl wait --for=condition=ready pod \
+              -l app.kubernetes.io/name=prometheus-operator \
+              -n monitoring \
+              --timeout=60s 2>/dev/null; then
+              echo "✅ Prometheus Operator ready"
+              break
+            fi
+            echo "Attempt $i/10 - Operator not ready yet..."
+            kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-operator
+            sleep 30
+          done
+          
+          echo ""
+          echo "All monitoring pods:"
+          kubectl get pods -n monitoring
 
       - name: Apply ServiceMonitor and Alerts
         run: |

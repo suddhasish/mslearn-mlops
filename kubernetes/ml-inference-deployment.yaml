@@ -9,7 +9,12 @@ metadata:
     app: ml-inference
     component: serving
 spec:
-  replicas: 2  # Initial replicas - HPA will manage this
+  replicas: 1  # Start with 1 replica for faster rollouts - HPA will scale if needed
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # Allow 1 extra pod during update
+      maxUnavailable: 0    # Keep all current pods running during update
   selector:
     matchLabels:
       app: ml-inference
@@ -41,11 +46,11 @@ spec:
         
         resources:
           requests:
-            cpu: "500m"      # 0.5 CPU cores
-            memory: "1Gi"     # 1GB RAM
+            cpu: "250m"      # 0.25 CPU cores (reduced for faster scheduling)
+            memory: "512Mi"  # 512MB RAM
           limits:
-            cpu: "2000m"      # 2 CPU cores max
-            memory: "4Gi"     # 4GB RAM max
+            cpu: "1000m"     # 1 CPU core max
+            memory: "2Gi"    # 2GB RAM max
         
         # Liveness probe - checks if container is alive
         livenessProbe:
