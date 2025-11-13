@@ -93,9 +93,30 @@ jobs:
       - name: Resolve all inputs
         id: resolve
         run: |
-          # Use DEV infrastructure (Terraform-deployed)
-          echo "model_name=${{ github.event.inputs.model_name || github.event.client_payload.model_name || 'diabetes_classification' }}" >> $GITHUB_OUTPUT
-          echo "model_version=${{ github.event.inputs.model_version || github.event.client_payload.model_version || 'latest' }}" >> $GITHUB_OUTPUT
+          # Resolve model name/version and infrastructure details
+          MODEL_NAME=${{ github.event.inputs.model_name || github.event.client_payload.model_name || 'diabetes_classification' }}
+          MODEL_VERSION_RAW=${{ github.event.inputs.model_version || github.event.client_payload.model_version || 'latest' }}
+
+          echo "Resolving model: $MODEL_NAME (requested: $MODEL_VERSION_RAW)"
+
+          if [ "${MODEL_VERSION_RAW}" = "latest" ]; then
+            # Query Azure ML for the latest model version by created date
+            MODEL_VERSION=$(az ml model list \
+              --workspace-name "${{ env.ML_WORKSPACE }}" \
+              --resource-group "${{ env.RESOURCE_GROUP }}" \
+              --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}" \
+              --query "[?name=='${MODEL_NAME}'] | sort_by(@, &created_date) | [-1].version" -o tsv)
+
+            if [ -z "${MODEL_VERSION}" ]; then
+              echo "::error::No registered versions found for model '${MODEL_NAME}'"
+              exit 1
+            fi
+          else
+            MODEL_VERSION=${MODEL_VERSION_RAW}
+          fi
+
+          echo "model_name=${MODEL_NAME}" >> $GITHUB_OUTPUT
+          echo "model_version=${MODEL_VERSION}" >> $GITHUB_OUTPUT
           echo "aml_workspace=${{ env.ML_WORKSPACE }}" >> $GITHUB_OUTPUT
           echo "resource_group=${{ env.RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "subscription_id=${{ env.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_OUTPUT
