@@ -1,0 +1,251 @@
+name: Weekly Drift Detection
+
+on:
+  schedule:
+    # Run every Sunday at midnight UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to check drift for'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      force_retrain:
+        description: 'Force retraining even if no drift detected'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  detect-drift:
+    name: Detect Data Drift
+    runs-on: ubuntu-latest
+    outputs:
+      should_retrain: ${{ steps.drift.outputs.retrain }}
+      drift_detected: ${{ steps.drift.outputs.drift_detected }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install scipy pandas numpy
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Set environment variables
+        run: |
+          ENV="${{ inputs.environment || 'dev' }}"
+          echo "ENVIRONMENT=$ENV" >> $GITHUB_ENV
+          echo "RESOURCE_GROUP=mlopsnew-$ENV-rg" >> $GITHUB_ENV
+          echo "ML_WORKSPACE=mlopsnew-$ENV-mlw" >> $GITHUB_ENV
+          echo "STORAGE_ACCOUNT=mlopsnew${ENV}st3kxldb" >> $GITHUB_ENV
+      
+      - name: Download baseline data
+        run: |
+          echo "📥 Downloading baseline (training) data..."
+          
+          # Download from Azure ML datastore
+          az ml data download \
+            --name diabetes-baseline \
+            --version latest \
+            --workspace-name ${{ env.ML_WORKSPACE }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --download-path ./data/baseline || {
+              echo "⚠️ Baseline dataset not found in Azure ML"
+              echo "Using local production data as baseline"
+              mkdir -p ./data/baseline
+              cp production/data/diabetes-prod.csv ./data/baseline/
+            }
+      
+      - name: Download production data
+        run: |
+          echo "📥 Downloading production inference data (last 7 days)..."
+          mkdir -p ./data/production
+          
+          # Calculate date range (last 7 days)
+          END_DATE=$(date -u +%Y-%m-%d)
+          START_DATE=$(date -u -d '7 days ago' +%Y-%m-%d)
+          
+          echo "Date range: $START_DATE to $END_DATE"
+          
+          # Download from blob storage (production-inference-data container)
+          az storage blob download-batch \
+            --account-name ${{ env.STORAGE_ACCOUNT }} \
+            --source production-inference-data \
+            --destination ./data/production \
+            --pattern "*.csv" \
+            --auth-mode login || {
+              echo "⚠️ No production data found in blob storage"
+              echo "Using sample data for testing"
+              cp production/data/diabetes-prod.csv ./data/production/sample.csv
+            }
+          
+          # Count files
+          FILE_COUNT=$(ls -1 ./data/production/*.csv 2>/dev/null | wc -l)
+          echo "📊 Downloaded $FILE_COUNT production data files"
+      
+      - name: Run drift detection
+        id: drift
+        run: |
+          echo "🔍 Running drift detection analysis..."
+          
+          # Run drift detection script
+          if python scripts/detect_drift.py \
+            --baseline ./data/baseline \
+            --production ./data/production \
+            --output drift_report.json \
+            --threshold 0.05; then
+            echo "✅ No significant drift detected"
+            echo "retrain=false" >> $GITHUB_OUTPUT
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Drift detected - retraining recommended"
+            echo "retrain=true" >> $GITHUB_OUTPUT
+            echo "drift_detected=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Upload drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report-${{ env.ENVIRONMENT }}
+          path: drift_report.json
+          retention-days: 90
+      
+      - name: Parse drift report
+        id: parse
+        run: |
+          echo "📊 Parsing drift report..."
+          
+          # Extract key metrics from report
+          TOTAL_FEATURES=$(jq -r '.summary.total_features_analyzed' drift_report.json)
+          DRIFTED_FEATURES=$(jq -r '.summary.features_with_drift' drift_report.json)
+          DRIFT_PERCENTAGE=$(jq -r '.summary.drift_percentage' drift_report.json)
+          SHOULD_RETRAIN=$(jq -r '.summary.should_retrain' drift_report.json)
+          RETRAIN_REASON=$(jq -r '.summary.retrain_reason' drift_report.json)
+          
+          echo "total_features=$TOTAL_FEATURES" >> $GITHUB_OUTPUT
+          echo "drifted_features=$DRIFTED_FEATURES" >> $GITHUB_OUTPUT
+          echo "drift_percentage=$DRIFT_PERCENTAGE" >> $GITHUB_OUTPUT
+          echo "retrain_reason=$RETRAIN_REASON" >> $GITHUB_OUTPUT
+      
+      - name: Create summary
+        run: |
+          echo "## 📊 Data Drift Detection Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u +%Y-%m-%d)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Features Analyzed | ${{ steps.parse.outputs.total_features }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Features with Drift | ${{ steps.parse.outputs.drifted_features }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Drift Percentage | ${{ steps.parse.outputs.drift_percentage }}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Should Retrain | ${{ steps.drift.outputs.retrain }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.drift.outputs.retrain }}" = "true" ]; then
+            echo "### 🚨 Retraining Recommended" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Reason:** ${{ steps.parse.outputs.retrain_reason }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Automated retraining will be triggered..." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ✅ Model is Stable" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No significant drift detected. Model does not require retraining." >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Post to Azure Monitor
+        if: always()
+        run: |
+          echo "📤 Posting drift metrics to Azure Monitor..."
+          
+          # Create custom event in Application Insights
+          # This allows querying drift history in Azure Monitor
+          
+          # Get Application Insights connection string
+          APPINSIGHTS_KEY=$(az monitor app-insights component show \
+            --app mlopsnew-${{ env.ENVIRONMENT }}-ai \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query instrumentationKey -o tsv)
+          
+          # Post custom event
+          curl -X POST "https://dc.services.visualstudio.com/v2/track" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "Microsoft.ApplicationInsights.Event",
+              "time": "'$(date -u +%Y-%m-%dT%H:%M:%S.000Z)'",
+              "iKey": "'$APPINSIGHTS_KEY'",
+              "data": {
+                "baseType": "EventData",
+                "baseData": {
+                  "name": "DataDriftCheck",
+                  "properties": {
+                    "environment": "${{ env.ENVIRONMENT }}",
+                    "total_features": "${{ steps.parse.outputs.total_features }}",
+                    "drifted_features": "${{ steps.parse.outputs.drifted_features }}",
+                    "drift_percentage": "${{ steps.parse.outputs.drift_percentage }}",
+                    "should_retrain": "${{ steps.drift.outputs.retrain }}",
+                    "reason": "${{ steps.parse.outputs.retrain_reason }}"
+                  }
+                }
+              }
+            }'
+          
+          echo "✅ Metrics posted to Application Insights"
+
+  trigger-retraining:
+    name: Trigger Model Retraining
+    needs: detect-drift
+    if: needs.detect-drift.outputs.should_retrain == 'true' || inputs.force_retrain == true
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Trigger training workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🚀 Triggering model retraining workflow..."
+          
+          gh workflow run ml-training-integrated.yml \
+            -f environment=${{ inputs.environment || 'dev' }} \
+            -f triggered_by=drift_detection
+          
+          echo "✅ Retraining workflow triggered"
+      
+      - name: Notify team
+        run: |
+          echo "## 🔄 Model Retraining Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Data drift detected in production data." >> $GITHUB_STEP_SUMMARY
+          echo "Automated retraining pipeline has been initiated." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment || 'dev' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** Drift detection workflow" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Monitor training progress in the [Actions tab](https://github.com/${{ github.repository }}/actions)" >> $GITHUB_STEP_SUMMARY

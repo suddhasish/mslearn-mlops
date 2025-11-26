@@ -5,8 +5,11 @@ import logging
 import traceback
 import time
 from datetime import datetime
+import csv
+from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 # Prefer joblib for sklearn models, fall back to pickle
@@ -27,6 +30,12 @@ DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME", "default")
 INIT_TIME = None
 REQUEST_COUNT = 0
 ERROR_COUNT = 0
+
+# Production data logging configuration
+ENABLE_DRIFT_LOGGING = os.getenv("ENABLE_DRIFT_LOGGING", "false").lower() == "true"
+DRIFT_LOG_DIR = os.getenv("DRIFT_LOG_DIR", "/tmp/production-inference-data")
+FEATURE_NAMES = ['Pregnancies', 'Glucose', 'BloodPressure', 'SkinThickness', 
+                 'Insulin', 'BMI', 'DiabetesPedigreeFunction', 'Age']
 
 # Prometheus metrics
 PREDICTION_COUNTER = Counter(
@@ -63,6 +72,56 @@ BATCH_SIZE_HISTOGRAM = Histogram(
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def _log_production_data(inputs, predictions=None, request_id=None):
+    """
+    Log production inference data for drift monitoring.
+    Saves input features and predictions to daily CSV files.
+    
+    Args:
+        inputs: Input features (numpy array)
+        predictions: Model predictions (optional)
+        request_id: Request ID for tracking
+    """
+    if not ENABLE_DRIFT_LOGGING:
+        return
+    
+    try:
+        # Create directory if it doesn't exist
+        log_dir = Path(DRIFT_LOG_DIR)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create daily log file
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        log_file = log_dir / f"inference_{today}.csv"
+        
+        # Prepare data
+        if isinstance(inputs, np.ndarray):
+            if inputs.ndim == 1:
+                inputs = inputs.reshape(1, -1)
+            
+            # Create DataFrame with feature names
+            n_features = inputs.shape[1]
+            columns = FEATURE_NAMES[:n_features] if n_features <= len(FEATURE_NAMES) else [f'feature_{i}' for i in range(n_features)]
+            
+            df = pd.DataFrame(inputs, columns=columns)
+            df['timestamp'] = datetime.utcnow().isoformat()
+            df['request_id'] = request_id
+            
+            if predictions is not None:
+                if isinstance(predictions, np.ndarray):
+                    df['prediction'] = predictions.flatten()
+            
+            # Append to file (create with header if new file)
+            file_exists = log_file.exists()
+            df.to_csv(log_file, mode='a', header=not file_exists, index=False)
+            
+            logger.debug(f"Logged {len(df)} inference records to {log_file}")
+        
+    except Exception as e:
+        # Don't fail the inference if logging fails
+        logger.warning(f"Failed to log production data: {e}")
 
 
 def _load_model_from_path(path):
@@ -368,6 +427,9 @@ def run(request_body):
         inference_duration = time.time() - start_time
         batch_size = len(prediction) if prediction is not None else 0
         
+        # Log production data for drift monitoring
+        _log_production_data(inputs, prediction, request_id)
+        
         result["metadata"] = {
             "model_name": MODEL_NAME,
             "model_version": MODEL_VERSION,
@@ -390,7 +452,7 @@ def run(request_body):
             model_version=MODEL_VERSION
         ).observe(inference_duration)
         
-        BATCH_SIZE_HISTOGRAM.labels(
+        BATCH_SIZE_HISTOGRAM.labels( 
             model_name=MODEL_NAME,
             model_version=MODEL_VERSION
         ).observe(batch_size)
