@@ -1,0 +1,1124 @@
+# Azure DevOps Pipeline - MLOps Blue/Green Deployment with Approval
+# Converted from GitHub Actions workflow: .github/workflows/cd-deploy.yml
+#
+# This pipeline uses Terraform-deployed infrastructure
+# DEV Environment: mlopsnew-dev-* resources
+# PROD Environment: mlopsnew-prod-* resources
+#
+# Prerequisites:
+# 1. Service Connection: azure-mlops-service-connection
+# 2. Variable Group: mlops-infrastructure
+# 3. Environments: staging, production-approval, production
+
+trigger: none  # Manual trigger only
+
+parameters:
+- name: environment
+  displayName: 'Target environment'
+  type: string
+  default: 'dev'
+  values:
+  - dev
+  - prod
+
+- name: model_name
+  displayName: 'Model name to deploy'
+  type: string
+  default: 'diabetes-classifier'
+
+- name: model_version
+  displayName: 'Model version or tag'
+  type: string
+  default: 'latest'
+
+- name: staging_instance_type
+  displayName: 'Staging VM instance type'
+  type: string
+  default: 'Standard_DS2_v2'
+
+- name: staging_instance_count
+  displayName: 'Staging instance count'
+  type: string
+  default: '1'
+
+- name: prod_instance_type
+  displayName: 'Production VM instance type'
+  type: string
+  default: 'Standard_DS3_v2'
+
+- name: prod_instance_count
+  displayName: 'Production instance count'
+  type: string
+  default: '2'
+
+- name: skip_staging_tests
+  displayName: 'Skip staging tests (not recommended)'
+  type: boolean
+  default: false
+
+variables:
+- group: mlops-infrastructure  # Contains: AZURE_SUBSCRIPTION_ID, RESOURCE_GROUP, ML_WORKSPACE, etc.
+
+- name: PYTHON_VERSION
+  value: '3.11'
+
+# DEV Environment (deployed via Terraform)
+- name: DEV_RESOURCE_GROUP
+  value: 'mlopsnew-dev-rg'
+- name: DEV_ML_WORKSPACE
+  value: 'mlopsnew-dev-mlw'
+- name: DEV_CONTAINER_REGISTRY
+  value: 'mlopsnewdevacr3kxldb.azurecr.io'
+- name: DEV_AKS_CLUSTER
+  value: 'mlopsnew-dev-aks'
+- name: DEV_KEY_VAULT
+  value: 'mlopsnew-dev-kv-3kxldb'
+
+# PROD Environment (to be deployed via Terraform)
+- name: PROD_RESOURCE_GROUP
+  value: 'mlopsnew-prod-rg'
+- name: PROD_ML_WORKSPACE
+  value: 'mlopsnew-prod-mlw'
+- name: PROD_CONTAINER_REGISTRY
+  value: 'mlopsnewprodacr.azurecr.io'
+- name: PROD_AKS_CLUSTER
+  value: 'mlopsnew-prod-aks'
+- name: PROD_KEY_VAULT
+  value: 'mlopsnew-prod-kv'
+
+# Endpoint names
+- name: AZURE_ML_STAGING_ENDPOINT_NAME
+  value: 'ml-endpoint-staging'
+- name: AZURE_ML_PRODUCTION_ENDPOINT_NAME
+  value: 'ml-endpoint-production'
+- name: STAGING_DEPLOYMENT_NAME
+  value: 'staging-deployment'
+- name: PROD_BLUE_DEPLOYMENT_NAME
+  value: 'blue-deployment'
+- name: PROD_GREEN_DEPLOYMENT_NAME
+  value: 'green-deployment'
+- name: MAX_WAIT_ITERATIONS
+  value: '30'
+- name: WAIT_INTERVAL_SECONDS
+  value: '10'
+
+stages:
+# ============================================================================
+# STAGE 1: Resolve Deployment Inputs
+# ============================================================================
+- stage: ResolveInputs
+  displayName: 'Resolve Deployment Inputs'
+  jobs:
+  - job: ResolveInputsJob
+    displayName: 'Resolve all inputs and infrastructure configuration'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Generate deployment ID'
+      name: GenerateDeploymentId
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          DEPLOYMENT_ID="deploy-$(date +%Y%m%d-%H%M%S)-$(Build.BuildId)"
+          echo "##vso[task.setvariable variable=deployment_id;isOutput=true]$DEPLOYMENT_ID"
+          echo "Generated Deployment ID: $DEPLOYMENT_ID"
+
+    - task: Bash@3
+      displayName: 'Resolve all inputs'
+      name: ResolveInputs
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -euo pipefail
+          
+          # Determine environment
+          ENV="${{ parameters.environment }}"
+          echo "Environment: $ENV"
+          echo "##vso[task.setvariable variable=environment;isOutput=true]$ENV"
+          
+          # Set environment-specific infrastructure values
+          if [ "$ENV" = "prod" ]; then
+            RG="$(PROD_RESOURCE_GROUP)"
+            WS="$(PROD_ML_WORKSPACE)"
+            ACR="$(PROD_CONTAINER_REGISTRY)"
+            AKS="$(PROD_AKS_CLUSTER)"
+            KV="$(PROD_KEY_VAULT)"
+          else
+            RG="$(DEV_RESOURCE_GROUP)"
+            WS="$(DEV_ML_WORKSPACE)"
+            ACR="$(DEV_CONTAINER_REGISTRY)"
+            AKS="$(DEV_AKS_CLUSTER)"
+            KV="$(DEV_KEY_VAULT)"
+          fi
+          
+          # Core inputs - use Terraform-deployed infrastructure
+          echo "##vso[task.setvariable variable=model_name;isOutput=true]${{ parameters.model_name }}"
+          echo "##vso[task.setvariable variable=model_version;isOutput=true]${{ parameters.model_version }}"
+          echo "##vso[task.setvariable variable=aml_workspace;isOutput=true]$WS"
+          echo "##vso[task.setvariable variable=resource_group;isOutput=true]$RG"
+          echo "##vso[task.setvariable variable=subscription_id;isOutput=true]$(AZURE_SUBSCRIPTION_ID)"
+          echo "##vso[task.setvariable variable=container_registry;isOutput=true]$ACR"
+          echo "##vso[task.setvariable variable=aks_cluster;isOutput=true]$AKS"
+          echo "##vso[task.setvariable variable=key_vault;isOutput=true]$KV"
+          
+          # Configuration inputs
+          echo "##vso[task.setvariable variable=staging_instance_type;isOutput=true]${{ parameters.staging_instance_type }}"
+          echo "##vso[task.setvariable variable=staging_instance_count;isOutput=true]${{ parameters.staging_instance_count }}"
+          echo "##vso[task.setvariable variable=prod_instance_type;isOutput=true]${{ parameters.prod_instance_type }}"
+          echo "##vso[task.setvariable variable=prod_instance_count;isOutput=true]${{ parameters.prod_instance_count }}"
+          echo "##vso[task.setvariable variable=skip_staging_tests;isOutput=true]${{ parameters.skip_staging_tests }}"
+          
+          echo "Model: ${{ parameters.model_name }}:${{ parameters.model_version }}"
+          echo "Workspace: $WS"
+          echo "Resource Group: $RG"
+
+    - task: Bash@3
+      displayName: 'Display infrastructure configuration'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "### 🏗️ Infrastructure Configuration"
+          echo ""
+          echo "**Environment**: ${{ parameters.environment }}"
+          echo ""
+          echo "| Resource | Value |"
+          echo "|----------|-------|"
+          echo "| Resource Group | $(ResolveInputs.resource_group) |"
+          echo "| ML Workspace | $(ResolveInputs.aml_workspace) |"
+          echo "| Container Registry | $(ResolveInputs.container_registry) |"
+          echo "| AKS Cluster | $(ResolveInputs.aks_cluster) |"
+          echo "| Key Vault | $(ResolveInputs.key_vault) |"
+          echo "| Subscription | $(ResolveInputs.subscription_id) |"
+
+    - task: Bash@3
+      displayName: 'Log deployment configuration'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "### 🚀 Deployment Configuration"
+          echo ""
+          echo "| Parameter | Value |"
+          echo "|-----------|-------|"
+          echo "| Model Name | ${{ parameters.model_name }} |"
+          echo "| Model Version | ${{ parameters.model_version }} |"
+          echo "| Workspace | $(ResolveInputs.aml_workspace) |"
+          echo "| Resource Group | $(ResolveInputs.resource_group) |"
+          echo "| Staging Instance | ${{ parameters.staging_instance_type }} (x${{ parameters.staging_instance_count }}) |"
+          echo "| Production Instance | ${{ parameters.prod_instance_type }} (x${{ parameters.prod_instance_count }}) |"
+          echo "| Deployment ID | $(GenerateDeploymentId.deployment_id) |"
+
+# ============================================================================
+# STAGE 2: Deploy to Staging Environment
+# ============================================================================
+- stage: DeployStaging
+  displayName: 'Deploy to Staging Environment'
+  dependsOn: ResolveInputs
+  variables:
+    deployment_id: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['GenerateDeploymentId.deployment_id'] ]
+    model_name: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_name'] ]
+    model_version: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_version'] ]
+    aml_workspace: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.aml_workspace'] ]
+    resource_group: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.resource_group'] ]
+    subscription_id: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.subscription_id'] ]
+    staging_instance_type: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.staging_instance_type'] ]
+    staging_instance_count: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.staging_instance_count'] ]
+    skip_staging_tests: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.skip_staging_tests'] ]
+  jobs:
+  - deployment: DeployStagingJob
+    displayName: 'Deploy model to staging endpoint'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: staging
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+
+          - template: templates/azure-ml-setup.yml
+            parameters:
+              pythonVersion: '$(PYTHON_VERSION)'
+
+          - task: AzureCLI@2
+            displayName: 'Create or update staging endpoint'
+            name: CreateStagingEndpoint
+            continueOnError: true
+            inputs:
+              azureSubscription: 'azure-mlops-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+                
+                echo "Creating/updating staging endpoint: $(AZURE_ML_STAGING_ENDPOINT_NAME)"
+                
+                az ml online-endpoint create \
+                  --name "$(AZURE_ML_STAGING_ENDPOINT_NAME)" \
+                  --workspace-name "$(aml_workspace)" \
+                  --resource-group "$(resource_group)" \
+                  --subscription "$(subscription_id)" \
+                  --auth-mode key \
+                  --tags environment=staging \
+                         deployed_by="$(Build.RequestedFor)" \
+                         deployment_run="$(Build.BuildId)" \
+                         deployment_id="$(deployment_id)" \
+                         model_name="$(model_name)" \
+                         model_version="$(model_version)"
+
+          - task: AzureCLI@2
+            displayName: 'Handle endpoint creation result'
+            condition: eq(variables['CreateStagingEndpoint.result'], 'Failed')
+            inputs:
+              azureSubscription: 'azure-mlops-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "##vso[task.logissue type=warning]Endpoint may already exist - verifying status..."
+                
+                status=$(az ml online-endpoint show \
+                  --name "$(AZURE_ML_STAGING_ENDPOINT_NAME)" \
+                  --workspace-name "$(aml_workspace)" \
+                  --resource-group "$(resource_group)" \
+                  --subscription "$(subscription_id)" \
+                  --query provisioning_state -o tsv)
+                
+                if [ "$status" != "Succeeded" ]; then
+                  echo "##vso[task.logissue type=error]Endpoint exists but is in $status state"
+                  exit 1
+                fi
+                
+                echo "✓ Endpoint already exists and is healthy"
+
+          - task: AzureCLI@2
+            displayName: 'Deploy model to staging'
+            name: DeployStaging
+            inputs:
+              azureSubscription: 'azure-mlops-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+                
+                echo "Deploying model $(model_name):$(model_version)"
+                
+                az ml online-deployment create \
+                  --endpoint-name "$(AZURE_ML_STAGING_ENDPOINT_NAME)" \
+                  --name "$(STAGING_DEPLOYMENT_NAME)" \
+                  --model "$(model_name):$(model_version)" \
+                  --workspace-name "$(aml_workspace)" \
+                  --resource-group "$(resource_group)" \
+                  --subscription "$(subscription_id)" \
+                  --instance-type "$(staging_instance_type)" \
+                  --instance-count "$(staging_instance_count)" \
+                  --all-traffic \
+                  --set environment_variables.DEPLOYMENT_ID="$(deployment_id)" \
+                  --set environment_variables.MODEL_VERSION="$(model_version)" \
+                  --tags environment=staging \
+                         model_name="$(model_name)" \
+                         model_version="$(model_version)" \
+                  --overwrite
+
+          - task: AzureCLI@2
+            displayName: 'Wait for staging deployment to be healthy'
+            name: WaitStaging
+            inputs:
+              azureSubscription: 'azure-mlops-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+                
+                echo "⏳ Waiting up to $(($(MAX_WAIT_ITERATIONS) * $(WAIT_INTERVAL_SECONDS) / 60)) minutes for deployment..."
+                
+                for i in $(seq 1 $(MAX_WAIT_ITERATIONS)); do
+                  status=$(az ml online-deployment show \
+                    --endpoint-name "$(AZURE_ML_STAGING_ENDPOINT_NAME)" \
+                    --name "$(STAGING_DEPLOYMENT_NAME)" \
+                    --workspace-name "$(aml_workspace)" \
+                    --resource-group "$(resource_group)" \
+                    --subscription "$(subscription_id)" \
+                    --query provisioning_state -o tsv)
+                  
+                  echo "[$i/$(MAX_WAIT_ITERATIONS)] Deployment state: $status"
+                  
+                  if [ "$status" = "Succeeded" ]; then
+                    echo "✓ Deployment provisioned successfully"
+                    exit 0
+                  elif [ "$status" = "Failed" ]; then
+                    echo "##vso[task.logissue type=error]Deployment provisioning failed"
+                    
+                    # Get error details
+                    az ml online-deployment show \
+                      --endpoint-name "$(AZURE_ML_STAGING_ENDPOINT_NAME)" \
+                      --name "$(STAGING_DEPLOYMENT_NAME)" \
+                      --workspace-name "$(aml_workspace)" \
+                      --resource-group "$(resource_group)" \
+                      --subscription "$(subscription_id)" \
+                      --query '{state:provisioning_state,error:provisioning_state_error}' -o json
+                    
+                    exit 1
+                  fi
+                  
+                  sleep $(WAIT_INTERVAL_SECONDS)
+                done
+                
+                echo "##vso[task.logissue type=error]Timeout waiting for deployment (exceeded $(($(MAX_WAIT_ITERATIONS) * $(WAIT_INTERVAL_SECONDS))) seconds)"
+                exit 1
+
+          - task: AzureCLI@2
+            displayName: 'Get staging endpoint details'
+            name: GetEndpoint
+            inputs:
+              azureSubscription: 'azure-mlops-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+                
+                ENDPOINT_URL=$(az ml online-endpoint show \
+                  --name "$(AZURE_ML_STAGING_ENDPOINT_NAME)" \
+                  --workspace-name "$(aml_workspace)" \
+                  --resource-group "$(resource_group)" \
+                  --subscription "$(subscription_id)" \
+                  --query scoring_uri -o tsv)
+                
+                # Get key but mask it immediately
+                ENDPOINT_KEY=$(az ml online-endpoint get-credentials \
+                  --name "$(AZURE_ML_STAGING_ENDPOINT_NAME)" \
+                  --workspace-name "$(aml_workspace)" \
+                  --resource-group "$(resource_group)" \
+                  --subscription "$(subscription_id)" \
+                  --query primaryKey -o tsv)
+                
+                # Mask the key before any output
+                echo "##vso[task.setvariable variable=ENDPOINT_KEY;issecret=true]$ENDPOINT_KEY"
+                
+                echo "##vso[task.setvariable variable=ENDPOINT_URL;isOutput=true]$ENDPOINT_URL"
+                echo "##vso[task.setvariable variable=ENDPOINT_KEY;isOutput=true]$ENDPOINT_KEY"
+                
+                echo "✓ Staging endpoint URL: $ENDPOINT_URL"
+
+          - task: Bash@3
+            displayName: 'Run staging endpoint tests'
+            condition: and(succeeded(), eq(variables['skip_staging_tests'], 'False'))
+            inputs:
+              targetType: 'inline'
+              script: |
+                set -euo pipefail
+                
+                echo "🧪 Running endpoint tests..."
+                
+                if [ ! -f "scripts/test_endpoint.py" ]; then
+                  echo "##vso[task.logissue type=warning]Test script not found at scripts/test_endpoint.py - skipping tests"
+                  exit 0
+                fi
+                
+                python scripts/test_endpoint.py --url "$(GetEndpoint.ENDPOINT_URL)" --key "$(GetEndpoint.ENDPOINT_KEY)"
+                
+                echo "✓ All staging tests passed"
+
+          - task: Bash@3
+            displayName: 'Set deployment status'
+            name: DeploymentStatus
+            condition: always()
+            inputs:
+              targetType: 'inline'
+              script: |
+                if [ "$(Agent.JobStatus)" = "Succeeded" ]; then
+                  echo "##vso[task.setvariable variable=state;isOutput=true]success"
+                else
+                  echo "##vso[task.setvariable variable=state;isOutput=true]failure"
+                fi
+
+          - task: Bash@3
+            displayName: 'Update deployment summary'
+            condition: always()
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "### 📊 Staging Deployment Results"
+                echo ""
+                
+                if [ "$(DeploymentStatus.state)" = "success" ]; then
+                  echo "✅ **Status**: Deployment successful"
+                  echo "🔗 **Endpoint**: $(GetEndpoint.ENDPOINT_URL)"
+                else
+                  echo "❌ **Status**: Deployment failed"
+                fi
+                
+                echo ""
+                echo "**Model**: $(model_name):$(model_version)"
+                echo "**Instance**: $(staging_instance_type) (x$(staging_instance_count))"
+
+# ============================================================================
+# STAGE 3: Prepare Production Blue/Green Deployment
+# ============================================================================
+- stage: PrepareProduction
+  displayName: 'Prepare Production Blue/Green Deployment'
+  dependsOn: 
+  - ResolveInputs
+  - DeployStaging
+  condition: succeeded('DeployStaging')
+  variables:
+    deployment_id: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['GenerateDeploymentId.deployment_id'] ]
+    model_name: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_name'] ]
+    model_version: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_version'] ]
+    aml_workspace: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.aml_workspace'] ]
+    resource_group: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.resource_group'] ]
+    subscription_id: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.subscription_id'] ]
+    prod_instance_type: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.prod_instance_type'] ]
+    prod_instance_count: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.prod_instance_count'] ]
+  jobs:
+  - job: PrepareProductionJob
+    displayName: 'Prepare production deployment'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - template: templates/azure-ml-setup.yml
+      parameters:
+        pythonVersion: '$(PYTHON_VERSION)'
+
+    - task: AzureCLI@2
+      displayName: 'Create or update production endpoint'
+      name: CreateProdEndpoint
+      continueOnError: true
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -euo pipefail
+          
+          echo "Creating/updating production endpoint: $(AZURE_ML_PRODUCTION_ENDPOINT_NAME)"
+          
+          az ml online-endpoint create \
+            --name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+            --workspace-name "$(aml_workspace)" \
+            --resource-group "$(resource_group)" \
+            --subscription "$(subscription_id)" \
+            --auth-mode key \
+            --tags environment=production \
+                   deployed_by="$(Build.RequestedFor)" \
+                   deployment_run="$(Build.BuildId)" \
+                   deployment_id="$(deployment_id)" \
+                   model_name="$(model_name)" \
+                   model_version="$(model_version)"
+
+    - task: AzureCLI@2
+      displayName: 'Handle production endpoint creation result'
+      condition: eq(variables['CreateProdEndpoint.result'], 'Failed')
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "##vso[task.logissue type=warning]Endpoint may already exist - verifying status..."
+          
+          status=$(az ml online-endpoint show \
+            --name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+            --workspace-name "$(aml_workspace)" \
+            --resource-group "$(resource_group)" \
+            --subscription "$(subscription_id)" \
+            --query provisioning_state -o tsv)
+          
+          if [ "$status" != "Succeeded" ]; then
+            echo "##vso[task.logissue type=error]Endpoint exists but is in $status state"
+            exit 1
+          fi
+          
+          echo "✓ Production endpoint already exists and is healthy"
+
+    - task: AzureCLI@2
+      displayName: 'Check for existing deployments'
+      name: CheckExisting
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -euo pipefail
+          
+          existing_count=$(az ml online-deployment list \
+            --endpoint-name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+            --workspace-name "$(aml_workspace)" \
+            --resource-group "$(resource_group)" \
+            --subscription "$(subscription_id)" \
+            --query "length([])" -o tsv)
+          
+          echo "##vso[task.setvariable variable=count;isOutput=true]$existing_count"
+          echo "Found $existing_count existing deployment(s)"
+
+    - task: AzureCLI@2
+      displayName: 'Ensure blue deployment exists (first-time setup)'
+      condition: eq(variables['CheckExisting.count'], '0')
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -euo pipefail
+          
+          echo "⚠️  No existing deployments - creating initial BLUE deployment"
+          
+          az ml online-deployment create \
+            --endpoint-name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+            --name "$(PROD_BLUE_DEPLOYMENT_NAME)" \
+            --model "$(model_name):$(model_version)" \
+            --workspace-name "$(aml_workspace)" \
+            --resource-group "$(resource_group)" \
+            --subscription "$(subscription_id)" \
+            --instance-type "$(prod_instance_type)" \
+            --instance-count "$(prod_instance_count)" \
+            --all-traffic \
+            --set environment_variables.DEPLOYMENT_ID="$(deployment_id)" \
+            --set environment_variables.MODEL_VERSION="$(model_version)" \
+            --set environment_variables.DEPLOYMENT_COLOR="blue" \
+            --tags environment=production \
+                   deployment_color=blue \
+                   model_name="$(model_name)" \
+                   model_version="$(model_version)" \
+            --overwrite
+          
+          echo "✓ Initial BLUE deployment created with 100% traffic"
+
+    - task: AzureCLI@2
+      displayName: 'Create GREEN deployment (no traffic)'
+      name: CreateGreen
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -euo pipefail
+          
+          echo "Creating GREEN deployment with new model version"
+          
+          az ml online-deployment create \
+            --endpoint-name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+            --name "$(PROD_GREEN_DEPLOYMENT_NAME)" \
+            --model "$(model_name):$(model_version)" \
+            --workspace-name "$(aml_workspace)" \
+            --resource-group "$(resource_group)" \
+            --subscription "$(subscription_id)" \
+            --instance-type "$(prod_instance_type)" \
+            --instance-count 1 \
+            --set environment_variables.DEPLOYMENT_ID="$(deployment_id)" \
+            --set environment_variables.MODEL_VERSION="$(model_version)" \
+            --set environment_variables.DEPLOYMENT_COLOR="green" \
+            --tags environment=production \
+                   deployment_color=green \
+                   model_name="$(model_name)" \
+                   model_version="$(model_version)" \
+            --overwrite
+
+    - task: AzureCLI@2
+      displayName: 'Wait for GREEN deployment to be ready'
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -euo pipefail
+          
+          echo "⏳ Waiting for GREEN deployment to be ready..."
+          
+          for i in $(seq 1 $(MAX_WAIT_ITERATIONS)); do
+            status=$(az ml online-deployment show \
+              --endpoint-name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+              --name "$(PROD_GREEN_DEPLOYMENT_NAME)" \
+              --workspace-name "$(aml_workspace)" \
+              --resource-group "$(resource_group)" \
+              --subscription "$(subscription_id)" \
+              --query provisioning_state -o tsv)
+            
+            echo "[$i/$(MAX_WAIT_ITERATIONS)] GREEN deployment state: $status"
+            
+            if [ "$status" = "Succeeded" ]; then
+              echo "✓ GREEN deployment is ready"
+              exit 0
+            elif [ "$status" = "Failed" ]; then
+              echo "##vso[task.logissue type=error]GREEN deployment failed"
+              az ml online-deployment show \
+                --endpoint-name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+                --name "$(PROD_GREEN_DEPLOYMENT_NAME)" \
+                --workspace-name "$(aml_workspace)" \
+                --resource-group "$(resource_group)" \
+                --subscription "$(subscription_id)" \
+                --query '{state:provisioning_state,error:provisioning_state_error}' -o json
+              exit 1
+            fi
+            
+            sleep $(WAIT_INTERVAL_SECONDS)
+          done
+          
+          echo "##vso[task.logissue type=error]Timeout waiting for GREEN deployment"
+          exit 1
+
+    - task: AzureCLI@2
+      displayName: 'Get GREEN deployment details'
+      name: GetGreenEndpoint
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -euo pipefail
+          
+          # Get deployment-specific URL for isolated testing
+          DEPLOYMENT_URL=$(az ml online-deployment show \
+            --endpoint-name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+            --name "$(PROD_GREEN_DEPLOYMENT_NAME)" \
+            --workspace-name "$(aml_workspace)" \
+            --resource-group "$(resource_group)" \
+            --subscription "$(subscription_id)" \
+            --query scoring_uri -o tsv)
+          
+          # Get endpoint key and mask it
+          ENDPOINT_KEY=$(az ml online-endpoint get-credentials \
+            --name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+            --workspace-name "$(aml_workspace)" \
+            --resource-group "$(resource_group)" \
+            --subscription "$(subscription_id)" \
+            --query primaryKey -o tsv)
+          
+          echo "##vso[task.setvariable variable=ENDPOINT_KEY;issecret=true]$ENDPOINT_KEY"
+          
+          echo "##vso[task.setvariable variable=DEPLOYMENT_URL;isOutput=true]$DEPLOYMENT_URL"
+          echo "##vso[task.setvariable variable=ENDPOINT_KEY;isOutput=true]$ENDPOINT_KEY"
+          
+          echo "✓ GREEN deployment URL: $DEPLOYMENT_URL"
+
+    - task: Bash@3
+      displayName: 'Test GREEN deployment in isolation'
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -euo pipefail
+          
+          echo "🧪 Testing GREEN deployment in isolation (before receiving traffic)..."
+          
+          if [ ! -f "scripts/test_endpoint.py" ]; then
+            echo "##vso[task.logissue type=warning]Test script not found - skipping isolated tests"
+            exit 0
+          fi
+          
+          python scripts/test_endpoint.py --url "$(GetGreenEndpoint.DEPLOYMENT_URL)" --key "$(GetGreenEndpoint.ENDPOINT_KEY)"
+          
+          echo "✓ GREEN deployment tests passed"
+
+    - task: AzureCLI@2
+      displayName: 'Show current traffic distribution'
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "📊 Current production traffic distribution:"
+          az ml online-endpoint show \
+            --name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+            --workspace-name "$(aml_workspace)" \
+            --resource-group "$(resource_group)" \
+            --subscription "$(subscription_id)" \
+            --query traffic -o json
+
+    - task: Bash@3
+      displayName: 'Update preparation summary'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "### 🎯 Production Preparation Complete"
+          echo ""
+          echo "✅ GREEN deployment created and validated"
+          echo "🔗 **Deployment URL**: $(GetGreenEndpoint.DEPLOYMENT_URL)"
+          echo ""
+          echo "⚠️  **Current status**: GREEN has 0% traffic (awaiting approval for rollout)"
+          echo ""
+          echo "**Next step**: Manual approval required to begin gradual traffic shift"
+
+# ============================================================================
+# STAGE 4: Production Approval Gate
+# ============================================================================
+- stage: ProductionApproval
+  displayName: '🔒 Await Production Approval'
+  dependsOn:
+  - ResolveInputs
+  - DeployStaging
+  - PrepareProduction
+  condition: succeeded('PrepareProduction')
+  variables:
+    deployment_id: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['GenerateDeploymentId.deployment_id'] ]
+    model_name: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_name'] ]
+    model_version: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_version'] ]
+    staging_endpoint_url: $[ stageDependencies.DeployStaging.DeployStagingJob.outputs['GetEndpoint.ENDPOINT_URL'] ]
+    green_deployment_url: $[ stageDependencies.PrepareProduction.PrepareProductionJob.outputs['GetGreenEndpoint.DEPLOYMENT_URL'] ]
+  jobs:
+  - deployment: AwaitApproval
+    displayName: 'Manual approval required'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: production-approval
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: Bash@3
+            displayName: 'Display approval information'
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "### 🔒 Production Deployment Approval Required"
+                echo ""
+                echo "✅ **Staging deployment**: Successful"
+                echo "✅ **GREEN deployment**: Created and tested in isolation"
+                echo ""
+                echo "**Deployment Details:**"
+                echo "- Model: $(model_name):$(model_version)"
+                echo "- Deployment ID: $(deployment_id)"
+                echo "- Endpoint: $(AZURE_ML_PRODUCTION_ENDPOINT_NAME)"
+                echo "- Staging URL: $(staging_endpoint_url)"
+                echo "- Production URL (GREEN): $(green_deployment_url)"
+                echo ""
+                echo "**Rollout Plan:**"
+                echo "1. Shift 10% traffic to GREEN → smoke test"
+                echo "2. Shift 50% traffic to GREEN → smoke test"
+                echo "3. Shift 100% traffic to GREEN → smoke test"
+                echo "4. Automatic rollback to BLUE if any test fails"
+                echo ""
+                echo "⚠️  **Approve this deployment to begin the gradual traffic rollout**"
+
+# ============================================================================
+# STAGE 5: Gradual Blue→Green Traffic Rollout
+# ============================================================================
+- stage: GradualRollout
+  displayName: '🚀 Gradual Blue→Green Traffic Rollout'
+  dependsOn:
+  - ResolveInputs
+  - ProductionApproval
+  condition: succeeded('ProductionApproval')
+  variables:
+    deployment_id: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['GenerateDeploymentId.deployment_id'] ]
+    model_name: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_name'] ]
+    model_version: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_version'] ]
+    aml_workspace: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.aml_workspace'] ]
+    resource_group: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.resource_group'] ]
+    subscription_id: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.subscription_id'] ]
+  jobs:
+  - deployment: GradualRolloutJob
+    displayName: 'Execute gradual traffic rollout'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: production
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+
+          - template: templates/azure-ml-setup.yml
+            parameters:
+              pythonVersion: '$(PYTHON_VERSION)'
+
+          - task: AzureCLI@2
+            displayName: 'Execute gradual traffic shift with validation'
+            name: Rollout
+            inputs:
+              azureSubscription: 'azure-mlops-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+                
+                ENDPOINT_NAME="$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)"
+                BLUE="$(PROD_BLUE_DEPLOYMENT_NAME)"
+                GREEN="$(PROD_GREEN_DEPLOYMENT_NAME)"
+                WORKSPACE="$(aml_workspace)"
+                RESOURCE_GROUP="$(resource_group)"
+                SUBSCRIPTION="$(subscription_id)"
+                
+                echo "🚀 Starting gradual rollout from BLUE to GREEN"
+                
+                # Function to run smoke tests
+                smoke_test() {
+                  local test_name="$1"
+                  
+                  echo "🧪 Running smoke test: $test_name"
+                  
+                  ENDPOINT_URL=$(az ml online-endpoint show \
+                    --name "$ENDPOINT_NAME" \
+                    --workspace-name "$WORKSPACE" \
+                    --resource-group "$RESOURCE_GROUP" \
+                    --subscription "$SUBSCRIPTION" \
+                    --query scoring_uri -o tsv)
+                  
+                  KEY=$(az ml online-endpoint get-credentials \
+                    --name "$ENDPOINT_NAME" \
+                    --workspace-name "$WORKSPACE" \
+                    --resource-group "$RESOURCE_GROUP" \
+                    --subscription "$SUBSCRIPTION" \
+                    --query primaryKey -o tsv)
+                  
+                  echo "##vso[task.setvariable variable=KEY;issecret=true]$KEY"
+                  
+                  if [ ! -f "scripts/test_endpoint.py" ]; then
+                    echo "##vso[task.logissue type=warning]Test script not found - skipping smoke test"
+                    return 0
+                  fi
+                  
+                  if python scripts/test_endpoint.py --url "$ENDPOINT_URL" --key "$KEY"; then
+                    echo "✅ Smoke test passed: $test_name"
+                    return 0
+                  else
+                    echo "##vso[task.logissue type=error]Smoke test failed: $test_name"
+                    return 1
+                  fi
+                }
+                
+                # Function to rollback to BLUE
+                rollback_to_blue() {
+                  local reason="$1"
+                  
+                  echo "##vso[task.logissue type=error]❌ ROLLBACK INITIATED: $reason"
+                  echo "Rolling back: routing 100% traffic to BLUE ($BLUE)"
+                  
+                  az ml online-endpoint update \
+                    --name "$ENDPOINT_NAME" \
+                    --workspace-name "$WORKSPACE" \
+                    --resource-group "$RESOURCE_GROUP" \
+                    --subscription "$SUBSCRIPTION" \
+                    --traffic "{\"$BLUE\":100}"
+                  
+                  echo "✓ Rollback complete - 100% traffic routed to BLUE"
+                  echo "##vso[task.setvariable variable=rollback_performed;isOutput=true]true"
+                }
+                
+                # Function to update traffic
+                update_traffic() {
+                  local blue_pct=$1
+                  local green_pct=$2
+                  
+                  echo "🔄 Shifting traffic: BLUE=$blue_pct%, GREEN=$green_pct%"
+                  
+                  if [ "$blue_pct" -eq 0 ]; then
+                    TRAFFIC_JSON="{\"$GREEN\":$green_pct}"
+                  else
+                    TRAFFIC_JSON="{\"$BLUE\":$blue_pct,\"$GREEN\":$green_pct}"
+                  fi
+                  
+                  echo "Applying traffic: $TRAFFIC_JSON"
+                  
+                  az ml online-endpoint update \
+                    --name "$ENDPOINT_NAME" \
+                    --workspace-name "$WORKSPACE" \
+                    --resource-group "$RESOURCE_GROUP" \
+                    --subscription "$SUBSCRIPTION" \
+                    --traffic "$TRAFFIC_JSON"
+                  
+                  echo "⏳ Waiting 30s for traffic propagation and metrics collection..."
+                  sleep 30
+                }
+                
+                # Initialize rollback flag
+                echo "##vso[task.setvariable variable=rollback_performed;isOutput=true]false"
+                
+                # Phase 1: 10% GREEN traffic
+                echo "📊 Phase 1: Shifting 10% traffic to GREEN"
+                if ! update_traffic 90 10; then
+                  rollback_to_blue "Failed to update traffic to 10%"
+                  exit 1
+                fi
+                
+                if ! smoke_test "10% traffic on GREEN"; then
+                  rollback_to_blue "Smoke test failed at 10%"
+                  exit 1
+                fi
+                
+                echo "✅ Phase 1 complete: 10% traffic validated"
+                
+                # Phase 2: 50% GREEN traffic
+                echo "📊 Phase 2: Shifting 50% traffic to GREEN"
+                if ! update_traffic 50 50; then
+                  rollback_to_blue "Failed to update traffic to 50%"
+                  exit 1
+                fi
+                
+                if ! smoke_test "50% traffic on GREEN"; then
+                  rollback_to_blue "Smoke test failed at 50%"
+                  exit 1
+                fi
+                
+                echo "✅ Phase 2 complete: 50% traffic validated"
+                
+                # Phase 3: 100% GREEN traffic
+                echo "📊 Phase 3: Shifting 100% traffic to GREEN"
+                if ! update_traffic 0 100; then
+                  rollback_to_blue "Failed to update traffic to 100%"
+                  exit 1
+                fi
+                
+                if ! smoke_test "100% traffic on GREEN"; then
+                  rollback_to_blue "Smoke test failed at 100%"
+                  exit 1
+                fi
+                
+                echo "✅ Phase 3 complete: 100% traffic validated"
+                echo "🎉 Rollout successful! GREEN deployment now serving 100% of production traffic"
+
+          - task: AzureCLI@2
+            displayName: 'Scale down BLUE deployment for cost savings'
+            condition: succeeded()
+            continueOnError: true
+            inputs:
+              azureSubscription: 'azure-mlops-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "💰 Scaling BLUE deployment to 0 instances for cost optimization"
+                
+                az ml online-deployment update \
+                  --endpoint-name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+                  --name "$(PROD_BLUE_DEPLOYMENT_NAME)" \
+                  --workspace-name "$(aml_workspace)" \
+                  --resource-group "$(resource_group)" \
+                  --subscription "$(subscription_id)" \
+                  --instance-count 0
+                
+                echo "✓ BLUE deployment scaled to 0 (kept for quick rollback if needed)"
+
+          - task: Bash@3
+            displayName: 'Update rollout summary'
+            condition: always()
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "### 📊 Production Rollout Results"
+                echo ""
+                
+                if [ "$(Rollout.rollback_performed)" = "true" ]; then
+                  echo "❌ **Status**: Rollout failed - rolled back to BLUE"
+                  echo ""
+                  echo "⚠️  **Current state**: 100% traffic on BLUE deployment"
+                  echo ""
+                  echo "**Action required**: Investigate failure, fix issues, and retry deployment"
+                elif [ "$(Agent.JobStatus)" = "Succeeded" ]; then
+                  echo "✅ **Status**: Rollout successful"
+                  echo ""
+                  echo "🎉 **Current state**: 100% traffic on GREEN deployment"
+                  echo ""
+                  echo "**Rollout phases completed:**"
+                  echo "- ✅ 10% traffic → validated"
+                  echo "- ✅ 50% traffic → validated"
+                  echo "- ✅ 100% traffic → validated"
+                  echo ""
+                  echo "💰 BLUE deployment scaled to 0 instances for cost savings"
+                else
+                  echo "❌ **Status**: Rollout failed"
+                fi
+                
+                echo ""
+                echo "**Deployment details:**"
+                echo "- Model: $(model_name):$(model_version)"
+                echo "- Deployment ID: $(deployment_id)"
+                echo "- Endpoint: $(AZURE_ML_PRODUCTION_ENDPOINT_NAME)"
+
+# ============================================================================
+# STAGE 6: Post-Deployment Validation
+# ============================================================================
+- stage: PostDeploymentValidation
+  displayName: '🔍 Post-Deployment Validation'
+  dependsOn:
+  - ResolveInputs
+  - GradualRollout
+  condition: succeeded('GradualRollout')
+  variables:
+    deployment_id: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['GenerateDeploymentId.deployment_id'] ]
+    model_name: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_name'] ]
+    model_version: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.model_version'] ]
+    aml_workspace: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.aml_workspace'] ]
+    resource_group: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.resource_group'] ]
+    subscription_id: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.subscription_id'] ]
+    prod_instance_type: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.prod_instance_type'] ]
+    prod_instance_count: $[ stageDependencies.ResolveInputs.ResolveInputsJob.outputs['ResolveInputs.prod_instance_count'] ]
+  jobs:
+  - job: ValidationJob
+    displayName: 'Validate final deployment state'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: 'Install Azure ML CLI extension'
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az config set extension.use_dynamic_install=yes_without_prompt
+          az extension add --name ml --yes --upgrade
+
+    - task: AzureCLI@2
+      displayName: 'Verify final traffic distribution'
+      inputs:
+        azureSubscription: 'azure-mlops-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "📊 Verifying final traffic distribution"
+          
+          traffic=$(az ml online-endpoint show \
+            --name "$(AZURE_ML_PRODUCTION_ENDPOINT_NAME)" \
+            --workspace-name "$(aml_workspace)" \
+            --resource-group "$(resource_group)" \
+            --subscription "$(subscription_id)" \
+            --query traffic -o json)
+          
+          echo "Current traffic: $traffic"
+          
+          green_traffic=$(echo "$traffic" | jq -r '.["$(PROD_GREEN_DEPLOYMENT_NAME)"] // 0')
+          
+          if [ "$green_traffic" != "100" ]; then
+            echo "##vso[task.logissue type=error]Expected GREEN to have 100% traffic, but got $green_traffic%"
+            exit 1
+          fi
+          
+          echo "✅ Verified: GREEN deployment has 100% traffic"
+
+    - task: Bash@3
+      displayName: 'Log deployment metrics'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "### 📈 Deployment Metrics"
+          echo ""
+          echo "| Metric | Value |"
+          echo "|--------|-------|"
+          echo "| Deployment Timestamp | $(date -u +%Y-%m-%dT%H:%M:%SZ) |"
+          echo "| Model Name | $(model_name) |"
+          echo "| Model Version | $(model_version) |"
+          echo "| Deployment ID | $(deployment_id) |"
+          echo "| Deployed By | $(Build.RequestedFor) |"
+          echo "| Build ID | $(Build.BuildId) |"
+          echo "| Instance Type | $(prod_instance_type) |"
+          echo "| Instance Count | $(prod_instance_count) |"
+
+    - task: Bash@3
+      displayName: 'Deployment success notification'
+      condition: succeeded()
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "## 🎉 Production Deployment Successful"
+          echo ""
+          echo "**Model**: $(model_name):$(model_version)"
+          echo "**Deployment ID**: $(deployment_id)"
+          echo "**Endpoint**: $(AZURE_ML_PRODUCTION_ENDPOINT_NAME)"
+          echo "**Deployed by**: $(Build.RequestedFor)"
+          echo ""
+          echo "✅ Gradual rollout completed: 10% → 50% → 100%"
+          echo "✅ All smoke tests passed"
+          echo "✅ GREEN deployment now serving 100% production traffic"

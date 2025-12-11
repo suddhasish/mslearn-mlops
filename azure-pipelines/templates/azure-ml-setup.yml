@@ -1,0 +1,35 @@
+# Reusable template for Azure ML environment setup
+# This template sets up Python and installs Azure ML CLI extension
+
+parameters:
+- name: pythonVersion
+  type: string
+  default: '3.11'
+
+steps:
+- task: UsePythonVersion@0
+  displayName: 'Set up Python ${{ parameters.pythonVersion }}'
+  inputs:
+    versionSpec: '${{ parameters.pythonVersion }}'
+    addToPath: true
+    architecture: 'x64'
+
+- task: Bash@3
+  displayName: 'Install Python dependencies'
+  inputs:
+    targetType: 'inline'
+    script: |
+      python -m pip install --upgrade pip
+      pip install -r requirements.txt
+      pip install azure-ai-ml azure-identity
+
+- task: AzureCLI@2
+  displayName: 'Install Azure ML CLI extension'
+  inputs:
+    azureSubscription: 'azure-mlops-service-connection'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az config set extension.use_dynamic_install=yes_without_prompt
+      az extension add --name ml --yes --upgrade
+      az version
